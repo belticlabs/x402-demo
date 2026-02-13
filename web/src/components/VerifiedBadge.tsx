@@ -381,11 +381,12 @@ export default function VerifiedBadge({
               <div className="space-y-2">
                 <div className="flex items-center justify-between p-2 bg-[var(--surface-hover)] rounded">
                   <span className="text-[var(--muted-foreground)]">Overall Rating</span>
+                  {/** Normalize to avoid case-sensitive mismatch e.g., LOW_RISK vs low_risk. */}
                   <span className={clsx(
                     'font-medium',
-                    overallRating.includes('low') ? 'text-[var(--success)]' :
-                    overallRating.includes('moderate') ? 'text-[var(--warning)]' :
-                    overallRating.includes('high') ? 'text-[var(--error)]' :
+                    overallRating.toLowerCase().includes('low') ? 'text-[var(--success)]' :
+                    overallRating.toLowerCase().includes('moderate') ? 'text-[var(--warning)]' :
+                    overallRating.toLowerCase().includes('high') ? 'text-[var(--error)]' :
                     'text-[var(--foreground)]'
                   )}>{overallRating.toUpperCase().replace(/_/g, ' ')}</span>
                 </div>

@@ -521,6 +521,14 @@ const OPENROUTER_MODEL_MAP: Record<string, Record<string, string>> = {
 /** Default model for demos */
 const DEFAULT_MODEL = ENV_OPENROUTER_MODEL_ID || OPENROUTER_MODEL_ID;
 
+function isPlaceholderModelValue(value: string): boolean {
+  const normalized = value.toLowerCase();
+  if (!normalized || normalized === 'unknown' || normalized === 'other') {
+    return true;
+  }
+  return false;
+}
+
 /**
  * Get OpenRouter model ID from credential model info
  */
@@ -533,6 +541,10 @@ export function getOpenRouterModel(provider: string, family: string): string {
   const normalizedFamily = normalizeModelField(family);
 
   if (!normalizedProvider || !normalizedFamily) {
+    return DEFAULT_MODEL;
+  }
+
+  if (isPlaceholderModelValue(normalizedProvider) || isPlaceholderModelValue(normalizedFamily)) {
     return DEFAULT_MODEL;
   }
 
