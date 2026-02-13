@@ -22,6 +22,9 @@ type PaymentFlowState =
   | 'payment_failed'
   | 'completed';
 
+const KYA_TIER_OPTIONS = ['tier_0', 'tier_1', 'tier_2', 'tier_3', 'tier_4'] as const;
+type KybTier = (typeof KYA_TIER_OPTIONS)[number];
+
 // Message type for display
 interface Message {
   id: string;
@@ -75,6 +78,7 @@ interface StreamState {
     thinkingStartTime: number | null;
     thinkingDuration: number | null;
     paymentSessionId: string;
+    minKybTier: KybTier;
   } | null;
 }
 
@@ -193,6 +197,18 @@ function formatCredentialDate(isoDate: string): string {
     return isoDate;
   }
 }
+const TX_HASH_PATTERN = /^0x[a-fA-F0-9]{64}$/;
+
+function isTransactionHash(value: string): boolean {
+  return TX_HASH_PATTERN.test(value);
+}
+
+function buildTxExplorerLink(txHash: string): string {
+  if (!isTransactionHash(txHash)) {
+    return '';
+  }
+  return `https://sepolia.basescan.org/tx/${txHash}`;
+}
 
 // Map verification level to display text
 function getOverallRating(verificationLevel: string, safetyRating?: string): string {
@@ -244,7 +260,17 @@ const defaultAgentInfo = {
 };
 
 // Header component - minimal
-function Header({ onReset }: { onReset: () => void }) {
+function Header({
+  onReset,
+  minKybTier,
+  onMinKybTierChange,
+  controlsDisabled,
+}: {
+  onReset: () => void;
+  minKybTier: KybTier;
+  onMinKybTierChange: (tier: KybTier) => void;
+  controlsDisabled: boolean;
+}) {
   const { theme, toggleTheme } = useTheme();
 
   return (
@@ -271,6 +297,11 @@ function Header({ onReset }: { onReset: () => void }) {
           <span className="font-medium text-base text-[var(--foreground)]">x402 + KYA</span>
         </div>
         <nav className="flex items-center gap-4">
+          <KybTierSelector
+            value={minKybTier}
+            onChange={onMinKybTierChange}
+            disabled={controlsDisabled}
+          />
           {/* Theme toggle */}
           <button
             onClick={toggleTheme}
@@ -383,6 +414,47 @@ interface VerifiedBadgeInfo {
   loadedFrom?: string;
 }
 
+interface KybTierSelectorProps {
+  value: KybTier;
+  onChange: (tier: KybTier) => void;
+  disabled?: boolean;
+}
+
+function KybTierSelector({ value, onChange, disabled = false }: KybTierSelectorProps) {
+  return (
+    <div className="inline-flex items-center gap-2">
+      <span className="text-xs text-[var(--muted)] whitespace-nowrap">Min KYB tier</span>
+      <div className="inline-flex rounded-md border border-[var(--border)] overflow-hidden bg-[var(--surface)]">
+        {KYA_TIER_OPTIONS.map((tier, idx) => (
+          <button
+            type="button"
+            onClick={() => onChange(tier)}
+            disabled={disabled}
+              className={clsx(
+                "px-2.5 py-1.5 text-xs transition-colors",
+                value === tier
+                  ? "border-l-0"
+                  : idx > 0 && "border-l border-[var(--border)]",
+                "last:border-r-0",
+                value === tier
+                  ? "bg-[var(--surface-hover)] text-[var(--foreground)] border-[var(--foreground)]/30 dark:bg-[var(--accent)] dark:text-[#14120B] dark:border-[var(--accent-hover)] dark:font-semibold dark:brightness-110"
+                  : "text-[var(--foreground)] hover:bg-[var(--surface-hover)]",
+                "outline-none focus:outline-none",
+                "dark:focus-visible:ring-2 dark:focus-visible:ring-[var(--accent)] dark:focus-visible:ring-offset-2 dark:focus-visible:ring-offset-[var(--surface)]",
+                "focus-visible:shadow-none",
+                disabled && "opacity-50 cursor-not-allowed"
+              )}
+            key={tier}
+            onMouseDown={(event) => event.currentTarget.blur()}
+          >
+            {idx}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // Scenario column component
 interface ScenarioColumnProps {
   scenario: Scenario;
@@ -486,15 +558,21 @@ function ScenarioColumn({ scenario, state, onPaymentDecision, agentInfo }: Scena
               <p className="text-sm font-medium text-[var(--foreground)]">
                 Payment confirmed · {state.lastTx.amount}
               </p>
-              <a
-                href={state.lastTx.link}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-xs text-[var(--muted)] hover:text-[var(--foreground)] inline-flex items-center gap-1 font-mono"
-              >
-                {state.lastTx.hash.slice(0, 10)}...{state.lastTx.hash.slice(-8)}
-                <ExternalLink className="w-3 h-3" />
-              </a>
+              {state.lastTx.link ? (
+                <a
+                  href={state.lastTx.link}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs text-[var(--muted)] hover:text-[var(--foreground)] inline-flex items-center gap-1 font-mono"
+                >
+                  {state.lastTx.hash.slice(0, 10)}...{state.lastTx.hash.slice(-8)}
+                  <ExternalLink className="w-3 h-3" />
+                </a>
+              ) : (
+                <span className="text-xs text-[var(--muted)] font-mono">
+                  {state.lastTx.hash.slice(0, 10)}...{state.lastTx.hash.slice(-8)} (verification link unavailable)
+                </span>
+              )}
             </div>
             <span className="text-xs text-[var(--muted)]">Base Sepolia</span>
           </div>
@@ -644,6 +722,7 @@ export default function Home() {
   const [leftState, setLeftState] = useState<StreamState>({ ...initialStreamState });
   const [rightState, setRightState] = useState<StreamState>({ ...initialStreamState });
   const payClickLocks = useRef<{ left: boolean; right: boolean }>({ left: false, right: false });
+  const [selectedKybTier, setSelectedKybTier] = useState<KybTier>('tier_3');
 
   // Agent credential info (fetched from API)
   const [agentInfo, setAgentInfo] = useState<VerifiedBadgeInfo>(defaultAgentInfo);
@@ -712,8 +791,10 @@ export default function Home() {
     setState: React.Dispatch<React.SetStateAction<StreamState>>,
     paymentConfirmed: boolean = false,
     existingThinking?: { content: string; startTime: number | null; duration: number | null },
-    paymentResume?: { paymentSessionId: string; paymentAttemptId: string }
+    paymentResume?: { paymentSessionId: string; paymentAttemptId: string; minKybTier?: KybTier }
   ) => {
+    const requestedKybTier = paymentResume?.minKybTier || selectedKybTier;
+
     const hasValidPaymentResume =
       !!paymentResume?.paymentSessionId && !!paymentResume?.paymentAttemptId;
 
@@ -785,6 +866,7 @@ export default function Home() {
           paymentConfirmed,
           paymentSessionId: paymentResume?.paymentSessionId,
           paymentAttemptId: paymentResume?.paymentAttemptId,
+          minKybTier: requestedKybTier,
         }),
       });
 
@@ -883,6 +965,7 @@ export default function Home() {
                     thinkingStartTime,
                     thinkingDuration,
                     paymentSessionId,
+                    minKybTier: requestedKybTier,
                   },
                 };
               });
@@ -900,6 +983,8 @@ export default function Home() {
               break;
 
             case 'payment_accepted':
+              const acceptedTxHash = event.txHash || '';
+              const acceptedTxLink = event.txLink || buildTxExplorerLink(acceptedTxHash);
               setState(prev => ({
                 ...prev,
                 paymentFlowState: 'completed',
@@ -907,15 +992,15 @@ export default function Home() {
                 paymentRequired: false,
                 pendingPaymentRequest: null,
                 txProcessing: false,
-                txHash: event.txHash || null,
-                txLink: event.txLink || null,
+                txHash: acceptedTxHash || null,
+                txLink: acceptedTxLink || null,
                 txError: null,
                 isPayActionLocked: false,
                 paymentSessionId: event.paymentSessionId || prev.paymentSessionId,
                 paymentAttemptId: null,
-                lastTx: event.txHash && event.txHash !== 'simulated' ? {
-                  hash: event.txHash,
-                  link: event.txLink || '',
+                lastTx: acceptedTxHash && acceptedTxHash !== 'simulated' ? {
+                  hash: acceptedTxHash,
+                  link: acceptedTxLink,
                   amount: prev.paymentInfo ? `$${prev.paymentInfo.finalPrice.toFixed(4)}` : '',
                 } : null,
               }));
@@ -952,6 +1037,7 @@ export default function Home() {
                     thinkingStartTime,
                     thinkingDuration,
                     paymentSessionId,
+                    minKybTier: requestedKybTier,
                   },
                 };
               });
@@ -1064,7 +1150,7 @@ export default function Home() {
         };
       });
     }
-  }, []);
+  }, [selectedKybTier]);
 
   const handlePaymentDecision = useCallback((
     scenario: Scenario,
@@ -1141,6 +1227,7 @@ export default function Home() {
       {
         paymentSessionId: pending.paymentSessionId,
         paymentAttemptId,
+        minKybTier: pending.minKybTier,
       }
     ).finally(() => {
       payClickLocks.current[lockKey] = false;
@@ -1158,9 +1245,9 @@ export default function Home() {
   // Handle sending message to both columns
   const handleSendToBoth = useCallback((content: string) => {
     // Start streaming for both columns in parallel
-    streamResponse('x402-only', content, setLeftState);
-    streamResponse('x402-kya', content, setRightState);
-  }, [streamResponse]);
+    streamResponse('x402-only', content, setLeftState, false, undefined, undefined, selectedKybTier);
+    streamResponse('x402-kya', content, setRightState, false, undefined, undefined, selectedKybTier);
+  }, [streamResponse, selectedKybTier]);
 
   // Reset both columns
   const handleReset = useCallback(() => {
@@ -1177,7 +1264,12 @@ export default function Home() {
   return (
     <div className="min-h-screen flex flex-col bg-[var(--background)]">
       {/* Header */}
-      <Header onReset={handleReset} />
+      <Header
+        onReset={handleReset}
+        minKybTier={selectedKybTier}
+        onMinKybTierChange={setSelectedKybTier}
+        controlsDisabled={isInputBlocked}
+      />
 
       {/* Main content - Two columns */}
       <div className="flex-1 flex min-h-0">
