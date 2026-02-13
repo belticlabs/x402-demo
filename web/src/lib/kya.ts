@@ -98,6 +98,15 @@ function resolveSigningKeyMaterial(belticDir: string): SigningKeyMaterial {
   const rawPrivate = process.env.KYA_SIGNING_PRIVATE_PEM?.trim();
   const rawPublic = process.env.KYA_SIGNING_PUBLIC_PEM?.trim();
 
+  console.info('[KYA] Resolving signing key material:', {
+    hasPrivateEnv: Boolean(rawPrivate),
+    hasPublicEnv: Boolean(rawPublic),
+    privatePrefix: rawPrivate?.slice(0, 30),
+    publicPrefix: rawPublic?.slice(0, 30),
+    belticDir,
+    belticDirExists: existsSync(belticDir),
+  });
+
   const explicitPrivate = rawPrivate ? normalizePem(rawPrivate) : undefined;
   const explicitPublic = rawPublic ? normalizePem(rawPublic) : undefined;
 
@@ -106,8 +115,12 @@ function resolveSigningKeyMaterial(belticDir: string): SigningKeyMaterial {
   }
 
   if (explicitPrivate && explicitPublic) {
+    const privateIsPem = isPemContent(explicitPrivate);
+    const publicIsPem = isPemContent(explicitPublic);
+    console.info('[KYA] PEM content detection:', { privateIsPem, publicIsPem });
+
     // If values look like PEM content, use directly (Vercel env var flow)
-    if (isPemContent(explicitPrivate) && isPemContent(explicitPublic)) {
+    if (privateIsPem && publicIsPem) {
       return { privatePem: explicitPrivate, publicPem: explicitPublic };
     }
     // Otherwise treat as file paths
@@ -210,7 +223,7 @@ function normalizeHeaders(headers: Headers): Record<string, string> {
 
 async function getSigningContext(): Promise<SigningContext> {
   if (!signingContextPromise) {
-    signingContextPromise = (async () => {
+    const promise = (async () => {
       const belticDir = findBelticDir();
       const { privatePem, publicPem } = resolveSigningKeyMaterial(belticDir);
 
@@ -221,7 +234,9 @@ async function getSigningContext(): Promise<SigningContext> {
 
       const credential = getCredential();
       if (!credential.success || !credential.jwt) {
-        throw new Error('Missing agent credential JWT for KYA signing');
+        throw new Error(
+          `Missing agent credential JWT for KYA signing: ${credential.errors.join('; ') || 'unknown reason'}`
+        );
       }
 
       const keyDirectoryUrl = resolveKeyDirectoryUrl();
@@ -235,6 +250,12 @@ async function getSigningContext(): Promise<SigningContext> {
         agentCredentialJwt: credential.jwt,
       };
     })();
+
+    // Don't cache rejected promises — allow retry on next call
+    promise.catch(() => {
+      signingContextPromise = null;
+    });
+    signingContextPromise = promise;
   }
 
   return signingContextPromise;
@@ -291,10 +312,10 @@ function buildIncomingRequest(req: NextRequest): IncomingHttpRequest {
 }
 
 export async function createSignedBelticHeaders(url: string, method = 'GET'): Promise<Record<string, string>> {
-  const ctx = await getSigningContextOrThrow('Unable to build signing context');
-  if (!ctx) {
-    throw new Error('Missing local KYA signing context');
-  }
+  const ctx = await getSigningContext().catch((error) => {
+    const reason = error instanceof Error ? error.message : 'unknown error';
+    throw new Error(`Missing local KYA signing context: ${reason}`);
+  });
 
   const baseHeaders: Record<string, string> = {
     Accept: 'application/json',
