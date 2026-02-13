@@ -19,6 +19,7 @@ interface PaymentModalProps {
   txHash?: string;
   txLink?: string;
   txError?: string;
+  disableActions?: boolean;
 }
 
 export default function PaymentModal({
@@ -36,6 +37,7 @@ export default function PaymentModal({
   txHash,
   txLink,
   txError,
+  disableActions = false,
 }: PaymentModalProps) {
   if (!isOpen) return null;
 
@@ -43,6 +45,7 @@ export default function PaymentModal({
   const savingsPercent = discount ? Math.round(discount * 100) : 0;
   const isSuccess = txHash && txHash !== 'simulated' && !txError;
   const isSimulated = txHash === 'simulated';
+  const isActionsDisabled = isProcessing || disableActions;
 
   const truncateHash = (hash: string) => {
     if (hash.length <= 16) return hash;
@@ -155,7 +158,7 @@ export default function PaymentModal({
           <div className="flex items-center gap-2 px-4 py-3 border-t border-[#2E2C23] dark:border-[#2E2C23]">
             <button
               onClick={onDecline}
-              disabled={isProcessing}
+              disabled={isActionsDisabled}
               className={clsx(
                 'flex-1 px-4 py-2 rounded-md text-sm font-medium',
                 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]',
@@ -167,7 +170,7 @@ export default function PaymentModal({
             </button>
             <button
               onClick={onAccept}
-              disabled={isProcessing}
+              disabled={isActionsDisabled}
               className={clsx(
                 'flex-1 px-4 py-2 rounded-md text-sm font-medium',
                 'bg-[#FF6B35] hover:bg-[#FF6B35]/90 text-white',

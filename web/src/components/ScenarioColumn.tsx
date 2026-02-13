@@ -179,12 +179,10 @@ export default function ScenarioColumn({
 }: ScenarioColumnProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [localThinkingStartTime] = useState(() => Date.now());
+  const [defaultVerifiedDate] = useState(() => new Date().toLocaleDateString());
 
   const isVerified = scenario === 'x402-kya';
   const variant = isVerified ? 'verified' : 'anonymous';
-
-  // Find any message with pending payment
-  const pendingPayment = messages.find((m) => m.payment?.status === 'pending');
 
   // Scenario configuration
   const scenarioConfig = {
@@ -225,7 +223,7 @@ export default function ScenarioColumn({
   const defaultAgentInfo: AgentInfo = {
     name: 'Demo Agent',
     organization: 'Beltic Labs',
-    verifiedAt: new Date().toLocaleDateString(),
+    verifiedAt: defaultVerifiedDate,
   };
 
   return (
@@ -289,7 +287,7 @@ export default function ScenarioColumn({
               <ChainOfThought
                 content={msg.thinking.content}
                 isStreaming={false}
-                startTime={Date.now() - msg.thinking.duration * 1000}
+                startTime={localThinkingStartTime - msg.thinking.duration * 1000}
                 defaultExpanded={false}
                 variant={variant}
               />

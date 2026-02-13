@@ -3,8 +3,12 @@
  */
 
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
-const MODEL = 'nvidia/nemotron-3-nano-30b-a3b:free';
 const API_URL = 'https://openrouter.ai/api/v1/chat/completions';
+const MODEL = process.env.OPENROUTER_MODEL_ID?.trim() || 'nvidia/nemotron-3-nano-30b-a3b:free';
+
+export function getConfiguredOpenRouterModel(): string {
+  return MODEL;
+}
 
 export interface ChatMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
@@ -51,8 +55,7 @@ export const weatherTool = {
       properties: {
         location: {
           type: 'string',
-          description: 'The location to get weather for (e.g., new-york, san-francisco, london)',
-          enum: ['state-college', 'new-york', 'san-francisco', 'london', 'tokyo'],
+          description: 'The location to get weather for (city, region, or country)',
         },
       },
       required: ['location'],

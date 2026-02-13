@@ -11,10 +11,10 @@ interface UnifiedChatInputProps {
 }
 
 const SUGGESTION_CHIPS = [
-  "What's the weather in NYC?",
-  "Detailed weather for Tokyo",
-  "Is it raining in London?",
-  "San Francisco forecast",
+  "What's the weather in the city I'm visiting?",
+  "Give me a detailed forecast for this region",
+  "Compare weather between two places",
+  "Is there rain expected this week?",
 ];
 
 export default function UnifiedChatInput({
@@ -135,7 +135,7 @@ export default function UnifiedChatInput({
             <span>
               {disabled
                 ? "Waiting for responses..."
-                : 'Try: "What\'s the weather in Tokyo?" or "Give me detailed NYC"'}
+                : 'Try: "What\'s the weather in a city?" or "Give me a detailed forecast for a region"'}
             </span>
           </p>
 

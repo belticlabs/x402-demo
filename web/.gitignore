@@ -23,6 +23,11 @@
 # misc
 .DS_Store
 *.pem
+.beltic/
+agent-credential.jwt
+agent-credential.json
+.beltic.yaml
+.pnpm-store/
 
 # debug
 npm-debug.log*

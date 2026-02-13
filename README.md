@@ -4,6 +4,10 @@
 
 This demo showcases how [KYA (Know Your Agent)](https://beltic.dev) and [x402](https://x402.org) work together to enable secure, trust-based AI agent commerce.
 
+## Known Issues
+
+Tracked non-blocking issues are documented in [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md).
+
 ## What This Demo Shows
 
 | Protocol | Question Answered |

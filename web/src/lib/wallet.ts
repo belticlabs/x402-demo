@@ -21,6 +21,10 @@ const USDC_CONTRACT_ADDRESS = '0x036cbd53842c5426634e7929541ec2318f3dcf7e' as co
 // USDC has 6 decimals
 const USDC_DECIMALS = 6;
 
+// Serialize on-chain writes from this process to avoid nonce collisions when
+// both scenario routes trigger payment at nearly the same time.
+let transferQueue: Promise<void> = Promise.resolve();
+
 // ERC-20 ABI for transfer and balanceOf
 const ERC20_ABI = [
   {
@@ -158,53 +162,103 @@ export async function transferUSDC(amount: number): Promise<{
     return { success: false, error: 'RECIPIENT_WALLET_ADDRESS not configured' };
   }
 
+  const runSerialized = async <T>(task: () => Promise<T>): Promise<T> => {
+    const previous = transferQueue;
+    let release: () => void = () => {};
+    transferQueue = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await previous;
+    try {
+      return await task();
+    } finally {
+      release();
+    }
+  };
+
+  const isNonceContentionError = (error: unknown): boolean => {
+    if (!(error instanceof Error)) return false;
+    const msg = error.message.toLowerCase();
+    return (
+      msg.includes('replacement transaction underpriced') ||
+      msg.includes('nonce too low') ||
+      msg.includes('already known') ||
+      msg.includes('transaction underpriced')
+    );
+  };
+
+  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
   try {
-    // Check balance first
-    const balance = await getUSDCBalance();
-    if (!balance.sufficient(amount)) {
-      return {
-        success: false,
-        error: `Insufficient USDC balance. Have ${balance.formatted} USDC, need ${amount} USDC`,
-      };
-    }
+    return await runSerialized(async () => {
+      // Check balance first
+      const balance = await getUSDCBalance();
+      if (!balance.sufficient(amount)) {
+        return {
+          success: false,
+          error: `Insufficient USDC balance. Have ${balance.formatted} USDC, need ${amount} USDC`,
+        };
+      }
 
-    const { publicClient, walletClient, account } = createClients();
+      const { publicClient, walletClient, account } = createClients();
 
-    // Convert amount to USDC units (6 decimals)
-    const amountInUnits = parseUnits(amount.toString(), USDC_DECIMALS);
+      // Convert amount to USDC units (6 decimals)
+      const amountInUnits = parseUnits(amount.toString(), USDC_DECIMALS);
 
-    // Simulate the transaction first
-    const { request } = await publicClient.simulateContract({
-      account,
-      address: USDC_CONTRACT_ADDRESS,
-      abi: ERC20_ABI,
-      functionName: 'transfer',
-      args: [recipientAddress as Address, amountInUnits],
+      const maxAttempts = 3;
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+          const nonce = await publicClient.getTransactionCount({
+            address: account.address,
+            blockTag: 'pending',
+          });
+
+          // Simulate the transaction first
+          const { request } = await publicClient.simulateContract({
+            account,
+            address: USDC_CONTRACT_ADDRESS,
+            abi: ERC20_ABI,
+            functionName: 'transfer',
+            args: [recipientAddress as Address, amountInUnits],
+            nonce,
+          });
+
+          // Execute the transaction
+          const txHash = await walletClient.writeContract({
+            ...request,
+            nonce,
+          });
+
+          // Wait for confirmation
+          const receipt = await publicClient.waitForTransactionReceipt({
+            hash: txHash,
+            confirmations: 1,
+          });
+
+          if (receipt.status === 'success') {
+            return {
+              success: true,
+              txHash,
+              txLink: getBaseScanLink(txHash),
+            };
+          }
+          return {
+            success: false,
+            error: 'Transaction reverted',
+            txHash,
+            txLink: getBaseScanLink(txHash),
+          };
+        } catch (error) {
+          if (attempt < maxAttempts && isNonceContentionError(error)) {
+            await sleep(300 * attempt);
+            continue;
+          }
+          throw error;
+        }
+      }
+
+      return { success: false, error: 'Transaction retry limit reached' };
     });
-
-    // Execute the transaction
-    const txHash = await walletClient.writeContract(request);
-
-    // Wait for confirmation
-    const receipt = await publicClient.waitForTransactionReceipt({
-      hash: txHash,
-      confirmations: 1,
-    });
-
-    if (receipt.status === 'success') {
-      return {
-        success: true,
-        txHash,
-        txLink: getBaseScanLink(txHash),
-      };
-    } else {
-      return {
-        success: false,
-        error: 'Transaction reverted',
-        txHash,
-        txLink: getBaseScanLink(txHash),
-      };
-    }
   } catch (error) {
     console.error('USDC transfer error:', error);
 
@@ -214,7 +268,10 @@ export async function transferUSDC(amount: number): Promise<{
       // Common error patterns
       if (error.message.includes('insufficient funds')) {
         errorMessage = 'Insufficient ETH for gas fees';
-      } else if (error.message.includes('nonce')) {
+      } else if (
+        error.message.includes('nonce') ||
+        error.message.includes('replacement transaction underpriced')
+      ) {
         errorMessage = 'Transaction nonce error - please try again';
       } else if (error.message.includes('rejected')) {
         errorMessage = 'Transaction rejected';
