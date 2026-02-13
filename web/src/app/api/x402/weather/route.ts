@@ -13,6 +13,7 @@ const weatherHandler = async (request: NextRequest): Promise<NextResponse> => {
   const { searchParams } = new URL(request.url);
   const location = (searchParams.get('location') || '').trim();
   const tier = getTierFromQuery(searchParams.get('tier'));
+  const minKybTier = searchParams.get('minKybTier') || undefined;
 
   if (!location) {
     return NextResponse.json({
@@ -22,7 +23,11 @@ const weatherHandler = async (request: NextRequest): Promise<NextResponse> => {
   }
 
   if (tier === 'verified') {
-    const verification = await verifyIncomingBelticRequest(request);
+    const verification = await verifyIncomingBelticRequest(request, {
+      policy: {
+        minKybTier,
+      },
+    });
     if (!verification.verified) {
       return NextResponse.json(
         {

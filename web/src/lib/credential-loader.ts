@@ -513,6 +513,9 @@ export function extractCredentialInfo(result: CredentialLoadResult): CredentialI
 
 /** Map credential model info to OpenRouter model ID */
 const OPENROUTER_MODEL_MAP: Record<string, Record<string, string>> = {
+  openrouter: {
+    nemotron: 'nvidia/nemotron-3-nano-30b-a3b:free',
+  },
   nvidia: {
     nemotron: 'nvidia/nemotron-3-nano-30b-a3b:free',
   },
@@ -552,15 +555,6 @@ export function getOpenRouterModel(provider: string, family: string): string {
     return family.trim();
   }
 
-  const directModelCandidate = `${provider.trim()}/${family.trim()}`;
-  if (isLikelyModelId(directModelCandidate)) {
-    return directModelCandidate;
-  }
-
-  if (normalizedProvider === 'openrouter' && normalizedFamily.includes('/')) {
-    return family.trim();
-  }
-
   const providerMap = OPENROUTER_MODEL_MAP[provider.toLowerCase()];
   if (providerMap) {
     // Try exact match first
@@ -574,6 +568,15 @@ export function getOpenRouterModel(provider: string, family: string): string {
         return value;
       }
     }
+  }
+
+  const directModelCandidate = `${provider.trim()}/${family.trim()}`;
+  if (isLikelyModelId(directModelCandidate)) {
+    return directModelCandidate;
+  }
+
+  if (normalizedProvider === 'openrouter' && normalizedFamily.includes('/')) {
+    return family.trim();
   }
 
   return `${provider.trim()}/${family.trim()}`;

@@ -16,7 +16,7 @@ import {
 import { createSignedBelticHeaders } from '@/lib/kya';
 import { parseWeatherToolArguments } from '@/lib/location';
 import { fetchWeatherByQuery } from '@/lib/weather';
-import { buildX402WeatherUrl, fetchDetailedWeatherThroughX402 } from '@/lib/x402';
+import { buildX402WeatherUrl, fetchDetailedWeatherThroughX402, type KybTier } from '@/lib/x402';
 import { createLineBufferParser, parseSseDataLine } from '@/lib/sse';
 
 // ============================================================================
@@ -94,6 +94,7 @@ interface ChatRequest {
   paymentConfirmed?: boolean;
   paymentSessionId?: string;
   paymentAttemptId?: string;
+  minKybTier?: string;
 }
 
 type PaymentAttemptStatus = 'processing' | 'accepted' | 'failed';
@@ -283,6 +284,7 @@ function parseStreamChunk(line: string): StreamChunk | null {
 
 export async function POST(request: NextRequest) {
   try {
+    const appUrl = new URL(request.url).origin;
     const body: ChatRequest = await request.json();
     const {
       message,
@@ -290,6 +292,7 @@ export async function POST(request: NextRequest) {
       paymentConfirmed,
       paymentSessionId: requestPaymentSessionId,
       paymentAttemptId,
+      minKybTier,
     } = body;
     
     // Build messages with credential-based system prompt
@@ -557,12 +560,23 @@ export async function POST(request: NextRequest) {
                   send({ type: 'payment_processing', paymentSessionId });
 
                   try {
-                    const url = buildX402WeatherUrl(location, 'verified');
+                    const normalizedMinKybTier =
+                      typeof minKybTier === 'string' && minKybTier.trim()
+                        ? (minKybTier.trim().toLowerCase() as KybTier)
+                        : undefined;
+                    const url = buildX402WeatherUrl(
+                      location,
+                      'verified',
+                      appUrl,
+                      normalizedMinKybTier
+                    );
                     const signedHeaders = await createSignedBelticHeaders(url, 'GET');
                     const paid = await fetchDetailedWeatherThroughX402(
                       location,
                       'verified',
-                      signedHeaders
+                      signedHeaders,
+                      appUrl,
+                      normalizedMinKybTier
                     );
 
                     paymentAttempts.set(attemptKey, {

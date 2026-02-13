@@ -10,6 +10,7 @@ import {
   signHttpRequest,
   verifyHttpSignature,
   type HttpSignatureHeaders,
+  type TrustPolicy,
   type IncomingHttpRequest,
 } from '@belticlabs/kya';
 import { type NextRequest } from 'next/server';
@@ -17,6 +18,8 @@ import { findBelticDir, getCredential } from '@/lib/credential-loader';
 import { evaluateModelPolicy } from '@/lib/model-policy';
 
 export type KyaVerificationMode = 'strict' | 'compat' | 'off';
+
+type SupportedKybTier = NonNullable<TrustPolicy['minKybTier']>;
 
 export interface KyaVerificationResult {
   verified: boolean;
@@ -29,6 +32,14 @@ export interface KyaVerificationResult {
   promptInjectionScore?: number;
   modelProvider?: string;
   modelFamily?: string;
+}
+
+export interface KyaVerificationPolicy {
+  minKybTier?: string;
+}
+
+export interface KyaVerificationOptions {
+  policy?: KyaVerificationPolicy;
 }
 
 interface SigningContext {
@@ -49,6 +60,9 @@ const KYB_RANK: Record<string, number> = {
   tier_3: 3,
   tier_4: 4,
 };
+
+const SUPPORTED_KYB_TIERS: ReadonlyArray<SupportedKybTier> = ['tier_0', 'tier_1', 'tier_2', 'tier_3', 'tier_4'];
+const DEFAULT_KYB_POLICY: TrustPolicy = { minKybTier: 'tier_3' };
 
 type SigningKeyPair = {
   privatePemPath: string;
@@ -156,7 +170,8 @@ function resolveKeyDirectoryUrl(): string {
     throw new Error('KYA key directory URL must use https for non-local hosts in production');
   }
 
-  const base = appBaseUrl.replace(/\/$/, '');
+  const protocol = localHost && parsed.protocol === 'http:' ? 'https:' : parsed.protocol;
+  const base = `${protocol}//${parsed.host}`.replace(/\/$/, '');
   return `${base}/api/.well-known/http-message-signatures-directory`;
 }
 
@@ -236,6 +251,32 @@ function getHeaderCaseInsensitive(headers: Record<string, string>, name: string)
   return key ? headers[key] : undefined;
 }
 
+function resolveConfiguredKybPolicy(): TrustPolicy {
+  const configured = process.env.KYA_MIN_KYB_TIER?.trim().toLowerCase() as SupportedKybTier | undefined;
+  if (configured && SUPPORTED_KYB_TIERS.includes(configured)) {
+    return { minKybTier: configured };
+  }
+  return DEFAULT_KYB_POLICY;
+}
+
+function normalizeKybTier(value?: string): SupportedKybTier | undefined {
+  const normalized = value?.trim().toLowerCase() as SupportedKybTier | undefined;
+  if (normalized && SUPPORTED_KYB_TIERS.includes(normalized)) {
+    return normalized;
+  }
+  return undefined;
+}
+
+function resolveKybPolicy(options: KyaVerificationOptions = {}): TrustPolicy {
+  const configuredPolicy = resolveConfiguredKybPolicy();
+  const requestedTier = normalizeKybTier(options.policy?.minKybTier);
+  return requestedTier ? { ...configuredPolicy, minKybTier: requestedTier } : configuredPolicy;
+}
+
+function rankKybTier(tier: string): number {
+  return KYB_RANK[tier] ?? KYB_RANK.tier_0;
+}
+
 function buildIncomingRequest(req: NextRequest): IncomingHttpRequest {
   return {
     method: req.method,
@@ -275,7 +316,10 @@ export async function createSignedBelticHeaders(url: string, method = 'GET'): Pr
   };
 }
 
-export async function verifyIncomingBelticRequest(req: NextRequest): Promise<KyaVerificationResult> {
+export async function verifyIncomingBelticRequest(
+  req: NextRequest,
+  options: KyaVerificationOptions = {}
+): Promise<KyaVerificationResult> {
   const mode = getKyaVerificationMode();
 
   if (mode === 'off') {
@@ -361,13 +405,16 @@ export async function verifyIncomingBelticRequest(req: NextRequest): Promise<Kya
     typeof vc.primaryModelProvider === 'string' ? vc.primaryModelProvider : undefined;
   const modelFamily =
     typeof vc.primaryModelFamily === 'string' ? vc.primaryModelFamily : undefined;
+  const policy = resolveKybPolicy(options);
+  const minKybTier = policy.minKybTier ?? DEFAULT_KYB_POLICY.minKybTier;
+  const minKybRank = rankKybTier(minKybTier);
 
   if (!developerVerified) {
     errors.push('developerCredentialVerified must be true');
   }
 
-  if ((KYB_RANK[kybTier] ?? 0) < KYB_RANK.tier_1) {
-    errors.push(`kybTierRequired must be at least tier_1 (got ${kybTier})`);
+  if (rankKybTier(kybTier) < minKybRank) {
+    errors.push(`kybTierRequired must be at least ${minKybTier} (got ${kybTier})`);
   }
 
   if (promptScore < 0.8) {

@@ -285,8 +285,52 @@ export async function transferUSDC(amount: number): Promise<{
 }
 
 // Generate BaseScan link for a transaction
-export function getBaseScanLink(txHash: Hash): string {
-  return `https://sepolia.basescan.org/tx/${txHash}`;
+function normalizeChainId(network?: string): string | undefined {
+  if (!network) return undefined;
+
+  const trimmed = network.trim().toLowerCase();
+  if (!trimmed) return undefined;
+
+  const eipMatch = trimmed.match(/eip155:\s*(\d+)/i);
+  if (eipMatch?.[1]) return eipMatch[1];
+
+  if (/^\d+$/.test(trimmed)) {
+    return trimmed;
+  }
+
+  if (trimmed === 'base' || trimmed === 'base-mainnet' || trimmed === 'base-main-chain') {
+    return '8453';
+  }
+
+  if (trimmed === 'base-sepolia' || trimmed === 'base-sep') {
+    return '84532';
+  }
+
+  return undefined;
+}
+
+function isValidTransactionHash(txHash: string): txHash is Hash {
+  return /^0x[a-fA-F0-9]{64}$/.test(txHash);
+}
+
+export function getBaseScanLink(txHash: string, network?: string): string {
+  if (!isValidTransactionHash(txHash)) {
+    return '';
+  }
+
+  const chainId = normalizeChainId(network);
+  if (chainId === '8453') {
+    return `https://basescan.org/tx/${txHash}`;
+  }
+
+  return `${getTransactionNetworkExplorer(network)}${txHash}`;
+}
+
+function getTransactionNetworkExplorer(network?: string): string {
+  if (normalizeChainId(network) === '8453') {
+    return 'https://basescan.org/tx/';
+  }
+  return 'https://sepolia.basescan.org/tx/';
 }
 
 // Get wallet info for logging/debugging

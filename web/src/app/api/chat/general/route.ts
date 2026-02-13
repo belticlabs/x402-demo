@@ -238,6 +238,7 @@ function parseStreamChunk(line: string): StreamChunk | null {
 
 export async function POST(request: NextRequest) {
   try {
+    const appUrl = new URL(request.url).origin;
     const body: ChatRequest = await request.json();
     const {
       message,
@@ -567,7 +568,12 @@ export async function POST(request: NextRequest) {
                   send({ type: 'payment_processing', paymentSessionId });
 
                   try {
-                    const paid = await fetchDetailedWeatherThroughX402(location, 'anonymous');
+                    const paid = await fetchDetailedWeatherThroughX402(
+                      location,
+                      'anonymous',
+                      undefined,
+                      appUrl
+                    );
                     paymentAttempts.set(attemptKey, {
                       status: 'accepted',
                       updatedAt: Date.now(),
