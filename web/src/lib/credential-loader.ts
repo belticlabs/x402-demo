@@ -28,6 +28,9 @@ const CREDENTIAL_FILE_NAMES = [
 /** Optional environment override for a specific credential path. */
 const ENV_CREDENTIAL_PATH = process.env.BELTIC_CREDENTIAL_PATH?.trim();
 
+/** Optional inline JWT content (for Vercel / serverless where files aren't available). */
+const ENV_CREDENTIAL_JWT = process.env.BELTIC_CREDENTIAL_JWT?.trim();
+
 /** Default .beltic directory name */
 const BELTIC_DIR_NAME = '.beltic';
 
@@ -283,33 +286,52 @@ export function findCredentialFile(baseDir: string = process.cwd()): string | nu
  */
 export function loadCredential(customPath?: string): CredentialLoadResult {
   const belticDir = findBelticDir();
-  const credentialPath = customPath || findCredentialFile();
   const errors: string[] = [];
-  
-  if (!credentialPath) {
-    return {
-      success: false,
-      credential: null,
-      jwt: null,
-      path: null,
-      belticDir,
-      errors: ['No credential file found in workspace.'],
-    };
+
+  // Prefer inline JWT from env var (Vercel / serverless deployments)
+  let jwt: string | null = null;
+  let credentialPath: string | null = null;
+
+  if (!customPath && ENV_CREDENTIAL_JWT) {
+    jwt = ENV_CREDENTIAL_JWT;
+    credentialPath = '(BELTIC_CREDENTIAL_JWT env var)';
+  } else {
+    credentialPath = customPath || findCredentialFile();
+
+    if (!credentialPath) {
+      return {
+        success: false,
+        credential: null,
+        jwt: null,
+        path: null,
+        belticDir,
+        errors: ['No credential file found in workspace. Set BELTIC_CREDENTIAL_JWT env var or place a JWT file in .beltic/.'],
+      };
+    }
+
+    try {
+      jwt = readFileSync(credentialPath, 'utf-8').trim();
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : 'Unknown error';
+      return {
+        success: false,
+        credential: null,
+        jwt: null,
+        path: credentialPath,
+        belticDir,
+        errors: [`Failed to read credential file: ${msg}`],
+      };
+    }
   }
-  
-  // Read the JWT file
-  let jwt: string;
-  try {
-    jwt = readFileSync(credentialPath, 'utf-8').trim();
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : 'Unknown error';
+
+  if (!jwt) {
     return {
       success: false,
       credential: null,
       jwt: null,
       path: credentialPath,
       belticDir,
-      errors: [`Failed to read credential file: ${msg}`],
+      errors: ['Credential JWT is empty.'],
     };
   }
   

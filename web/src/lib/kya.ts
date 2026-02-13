@@ -10,7 +10,6 @@ import {
   signHttpRequest,
   verifyHttpSignature,
   type HttpSignatureHeaders,
-  type TrustPolicy,
   type IncomingHttpRequest,
 } from '@belticlabs/kya';
 import { type NextRequest } from 'next/server';
@@ -19,7 +18,11 @@ import { evaluateModelPolicy } from '@/lib/model-policy';
 
 export type KyaVerificationMode = 'strict' | 'compat' | 'off';
 
-type SupportedKybTier = NonNullable<TrustPolicy['minKybTier']>;
+type KybTierValue = 'tier_0' | 'tier_1' | 'tier_2' | 'tier_3' | 'tier_4';
+
+interface LocalKybPolicy {
+  minKybTier: KybTierValue;
+}
 
 export interface KyaVerificationResult {
   verified: boolean;
@@ -61,12 +64,12 @@ const KYB_RANK: Record<string, number> = {
   tier_4: 4,
 };
 
-const SUPPORTED_KYB_TIERS: ReadonlyArray<SupportedKybTier> = ['tier_0', 'tier_1', 'tier_2', 'tier_3', 'tier_4'];
-const DEFAULT_KYB_POLICY: TrustPolicy = { minKybTier: 'tier_3' };
+const SUPPORTED_KYB_TIERS: ReadonlyArray<KybTierValue> = ['tier_0', 'tier_1', 'tier_2', 'tier_3', 'tier_4'];
+const DEFAULT_KYB_POLICY: LocalKybPolicy = { minKybTier: 'tier_3' };
 
-type SigningKeyPair = {
-  privatePemPath: string;
-  publicPemPath: string;
+type SigningKeyMaterial = {
+  privatePem: string;
+  publicPem: string;
 };
 
 const PRIVATE_SUFFIXES = ['-private.pem', '.private.pem'];
@@ -81,7 +84,11 @@ function extractStem(filename: string, suffixes: string[]): string | null {
   return null;
 }
 
-function resolveSigningKeyPair(belticDir: string): SigningKeyPair {
+function isPemContent(value: string): boolean {
+  return value.trimStart().startsWith('-----BEGIN');
+}
+
+function resolveSigningKeyMaterial(belticDir: string): SigningKeyMaterial {
   const explicitPrivate = process.env.KYA_SIGNING_PRIVATE_PEM?.trim();
   const explicitPublic = process.env.KYA_SIGNING_PUBLIC_PEM?.trim();
 
@@ -90,6 +97,11 @@ function resolveSigningKeyPair(belticDir: string): SigningKeyPair {
   }
 
   if (explicitPrivate && explicitPublic) {
+    // If values look like PEM content, use directly (Vercel env var flow)
+    if (isPemContent(explicitPrivate) && isPemContent(explicitPublic)) {
+      return { privatePem: explicitPrivate, publicPem: explicitPublic };
+    }
+    // Otherwise treat as file paths
     if (!existsSync(explicitPrivate)) {
       throw new Error(`KYA_SIGNING_PRIVATE_PEM not found: ${explicitPrivate}`);
     }
@@ -97,8 +109,8 @@ function resolveSigningKeyPair(belticDir: string): SigningKeyPair {
       throw new Error(`KYA_SIGNING_PUBLIC_PEM not found: ${explicitPublic}`);
     }
     return {
-      privatePemPath: explicitPrivate,
-      publicPemPath: explicitPublic,
+      privatePem: readFileSync(explicitPrivate, 'utf-8'),
+      publicPem: readFileSync(explicitPublic, 'utf-8'),
     };
   }
 
@@ -107,7 +119,7 @@ function resolveSigningKeyPair(belticDir: string): SigningKeyPair {
   }
 
   const files = readdirSync(belticDir);
-  const candidates: Array<SigningKeyPair & { modifiedAt: number }> = [];
+  const candidates: Array<{ privatePemPath: string; publicPemPath: string; modifiedAt: number }> = [];
 
   for (const file of files) {
     const stem = extractStem(file, PRIVATE_SUFFIXES);
@@ -126,11 +138,7 @@ function resolveSigningKeyPair(belticDir: string): SigningKeyPair {
       statSync(publicPemPath).mtimeMs
     );
 
-    candidates.push({
-      privatePemPath,
-      publicPemPath,
-      modifiedAt,
-    });
+    candidates.push({ privatePemPath, publicPemPath, modifiedAt });
   }
 
   if (candidates.length === 0) {
@@ -141,8 +149,8 @@ function resolveSigningKeyPair(belticDir: string): SigningKeyPair {
 
   candidates.sort((a, b) => b.modifiedAt - a.modifiedAt);
   return {
-    privatePemPath: candidates[0].privatePemPath,
-    publicPemPath: candidates[0].publicPemPath,
+    privatePem: readFileSync(candidates[0].privatePemPath, 'utf-8'),
+    publicPem: readFileSync(candidates[0].publicPemPath, 'utf-8'),
   };
 }
 
@@ -195,10 +203,7 @@ async function getSigningContext(): Promise<SigningContext> {
   if (!signingContextPromise) {
     signingContextPromise = (async () => {
       const belticDir = findBelticDir();
-      const { privatePemPath, publicPemPath } = resolveSigningKeyPair(belticDir);
-
-      const privatePem = readFileSync(privatePemPath, 'utf-8');
-      const publicPem = readFileSync(publicPemPath, 'utf-8');
+      const { privatePem, publicPem } = resolveSigningKeyMaterial(belticDir);
 
       const privateKey = await importKeyFromPEM(privatePem, 'EdDSA');
       const publicKey = await importKeyFromPEM(publicPem, 'EdDSA');
@@ -251,26 +256,17 @@ function getHeaderCaseInsensitive(headers: Record<string, string>, name: string)
   return key ? headers[key] : undefined;
 }
 
-function resolveConfiguredKybPolicy(): TrustPolicy {
-  const configured = process.env.KYA_MIN_KYB_TIER?.trim().toLowerCase() as SupportedKybTier | undefined;
-  if (configured && SUPPORTED_KYB_TIERS.includes(configured)) {
-    return { minKybTier: configured };
-  }
-  return DEFAULT_KYB_POLICY;
-}
-
-function normalizeKybTier(value?: string): SupportedKybTier | undefined {
-  const normalized = value?.trim().toLowerCase() as SupportedKybTier | undefined;
+function normalizeKybTier(value?: string): KybTierValue | undefined {
+  const normalized = value?.trim().toLowerCase() as KybTierValue | undefined;
   if (normalized && SUPPORTED_KYB_TIERS.includes(normalized)) {
     return normalized;
   }
   return undefined;
 }
 
-function resolveKybPolicy(options: KyaVerificationOptions = {}): TrustPolicy {
-  const configuredPolicy = resolveConfiguredKybPolicy();
+function resolveKybPolicy(options: KyaVerificationOptions = {}): LocalKybPolicy {
   const requestedTier = normalizeKybTier(options.policy?.minKybTier);
-  return requestedTier ? { ...configuredPolicy, minKybTier: requestedTier } : configuredPolicy;
+  return requestedTier ? { minKybTier: requestedTier } : DEFAULT_KYB_POLICY;
 }
 
 function rankKybTier(tier: string): number {

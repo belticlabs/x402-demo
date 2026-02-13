@@ -1245,8 +1245,8 @@ export default function Home() {
   // Handle sending message to both columns
   const handleSendToBoth = useCallback((content: string) => {
     // Start streaming for both columns in parallel
-    streamResponse('x402-only', content, setLeftState, false, undefined, undefined, selectedKybTier);
-    streamResponse('x402-kya', content, setRightState, false, undefined, undefined, selectedKybTier);
+    streamResponse('x402-only', content, setLeftState, false, undefined, undefined);
+    streamResponse('x402-kya', content, setRightState, false, undefined, undefined);
   }, [streamResponse, selectedKybTier]);
 
   // Reset both columns
