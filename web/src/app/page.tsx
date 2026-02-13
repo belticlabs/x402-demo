@@ -322,7 +322,7 @@ function Header({
             Reset
           </button>
           <a
-            href="https://docs.belticlabs.com"
+            href="https://kya-docs.beltic.app/docs"
             target="_blank"
             rel="noopener noreferrer"
             className="text-sm text-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
@@ -330,7 +330,7 @@ function Header({
             Docs
           </a>
           <a
-            href="https://github.com/belticlabs"
+            href="https://github.com/belticlabs/x402-demo/tree/main/web"
             target="_blank"
             rel="noopener noreferrer"
             className="text-sm text-[var(--muted)] hover:text-[var(--foreground)] transition-colors"
