@@ -8,6 +8,7 @@ const REQUIRED_ENV = [
   'AGENT_PRIVATE_KEY',
   'RECIPIENT_WALLET_ADDRESS',
 ];
+const DEMO_MODE = process.env.DEMO_MODE === 'true' || process.env.X402_DEMO_MODE === 'true';
 
 const PRIVATE_SUFFIXES = ['-private.pem', '.private.pem'];
 const PUBLIC_SUFFIXES = ['-public.pem', '.public.pem'];
@@ -92,6 +93,7 @@ function main() {
   const envPath = join(cwd, '.env');
   const envValues = { ...parseEnv(envPath), ...process.env };
   const issues = [];
+  const warnings = [];
 
   if (!existsSync(envPath)) {
     issues.push('Missing .env file. Run: cp .env.example .env');
@@ -116,12 +118,20 @@ function main() {
   const belticDir = findBelticDir(cwd);
   const keyPair = findKeyPair(belticDir);
   if (!keyPair) {
-    issues.push(`No signing key pair found in ${belticDir}. Run: pnpm bootstrap:wizard-local`);
+    if (DEMO_MODE) {
+      warnings.push(`No signing key pair found in ${belticDir}. Run: pnpm bootstrap:wizard-local`);
+    } else {
+      issues.push(`No signing key pair found in ${belticDir}. Run: pnpm bootstrap:wizard-local`);
+    }
   }
 
   const credentialPath = findCredential(cwd, belticDir);
   if (!credentialPath) {
-    issues.push('No agent credential JWT found. Run: pnpm bootstrap:wizard-local');
+    if (DEMO_MODE) {
+      warnings.push('No agent credential JWT found. Run: pnpm bootstrap:wizard-local');
+    } else {
+      issues.push('No agent credential JWT found. Run: pnpm bootstrap:wizard-local');
+    }
   }
 
   if (issues.length > 0) {
@@ -129,7 +139,16 @@ function main() {
     for (const issue of issues) {
       console.error(`- ${issue}`);
     }
-    process.exit(1);
+    if (!DEMO_MODE) {
+      process.exit(1);
+    }
+  }
+
+  if (DEMO_MODE && warnings.length > 0) {
+    console.warn('Setup warnings (running in demo mode):\n');
+    for (const warning of warnings) {
+      console.warn(`- ${warning}`);
+    }
   }
 
   console.log('Setup check passed.');
