@@ -1,0 +1,4 @@
+.beltic/
+.beltic.yaml
+.DS_Store
+.env*
