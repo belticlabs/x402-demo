@@ -88,9 +88,18 @@ function isPemContent(value: string): boolean {
   return value.trimStart().startsWith('-----BEGIN');
 }
 
+/** Normalize literal \n sequences to real newlines (common in env vars). */
+function normalizePem(value: string): string {
+  // Replace literal two-char sequence \n with actual newlines
+  return value.replace(/\\n/g, '\n').trim();
+}
+
 function resolveSigningKeyMaterial(belticDir: string): SigningKeyMaterial {
-  const explicitPrivate = process.env.KYA_SIGNING_PRIVATE_PEM?.trim();
-  const explicitPublic = process.env.KYA_SIGNING_PUBLIC_PEM?.trim();
+  const rawPrivate = process.env.KYA_SIGNING_PRIVATE_PEM?.trim();
+  const rawPublic = process.env.KYA_SIGNING_PUBLIC_PEM?.trim();
+
+  const explicitPrivate = rawPrivate ? normalizePem(rawPrivate) : undefined;
+  const explicitPublic = rawPublic ? normalizePem(rawPublic) : undefined;
 
   if ((explicitPrivate && !explicitPublic) || (!explicitPrivate && explicitPublic)) {
     throw new Error('Set both KYA_SIGNING_PRIVATE_PEM and KYA_SIGNING_PUBLIC_PEM together');

@@ -722,7 +722,7 @@ export default function Home() {
   const [leftState, setLeftState] = useState<StreamState>({ ...initialStreamState });
   const [rightState, setRightState] = useState<StreamState>({ ...initialStreamState });
   const payClickLocks = useRef<{ left: boolean; right: boolean }>({ left: false, right: false });
-  const [selectedKybTier, setSelectedKybTier] = useState<KybTier>('tier_3');
+  const [selectedKybTier, setSelectedKybTier] = useState<KybTier>('tier_2');
 
   // Agent credential info (fetched from API)
   const [agentInfo, setAgentInfo] = useState<VerifiedBadgeInfo>(defaultAgentInfo);
