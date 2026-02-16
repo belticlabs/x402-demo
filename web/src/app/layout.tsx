@@ -2,7 +2,10 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { ThemeProvider } from "@/components/ThemeProvider";
 
+const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+
 export const metadata: Metadata = {
+  metadataBase: new URL(appUrl),
   title: "x402 + KYA Demo | Verified AI Agent Payments",
   description:
     "Experience the difference between anonymous and verified AI agents with x402 payment protocol and Beltic KYA credentials.",
@@ -12,6 +15,14 @@ export const metadata: Metadata = {
     title: "x402 + KYA Demo",
     description: "Verified AI Agent Payments",
     type: "website",
+    images: [
+      {
+        url: "/preview.jpg",
+        width: 1200,
+        height: 630,
+        alt: "x402 Proof-of-Concept",
+      },
+    ],
   },
 };
 
