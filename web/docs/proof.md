@@ -122,6 +122,7 @@ curl http://localhost:3002/api/credential
 
 3. Error: `asn1 encoding routines::wrong tag`
 - Usually indicates malformed PEM, wrong key type, or swapped key values.
+- **On Vercel**: Use `\n` for newlines in the env var value (e.g. `-----BEGIN PRIVATE KEY-----\nM...\n-----END PRIVATE KEY-----`), not literal line breaks.
 - Re-copy key material and check BEGIN/END headers:
   - `BEGIN PRIVATE KEY` for private key
   - `BEGIN PUBLIC KEY` for public key

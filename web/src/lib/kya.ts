@@ -88,7 +88,11 @@ function isPemContent(value: string): boolean {
   return value.trimStart().startsWith('-----BEGIN');
 }
 
-/** Normalize literal \n sequences to real newlines (common in env vars). */
+/**
+ * Normalize PEM from env vars (Vercel, etc.).
+ * - Replaces literal \n with real newlines.
+ * - If newlines were stripped (single-line PEM), re-inserts them.
+ */
 function normalizePem(value: string): string {
   const trimmed = value.trim();
   const unwrapped =
@@ -98,7 +102,24 @@ function normalizePem(value: string): string {
       : trimmed;
 
   // Replace literal two-char sequence \n with actual newlines.
-  return unwrapped.replace(/\\n/g, '\n').trim();
+  let result = unwrapped.replace(/\\n/g, '\n').trim();
+
+  // If still no newlines (Vercel may strip them), reconstruct PEM structure.
+  if (result.includes('-----BEGIN') && result.includes('-----END') && !result.includes('\n')) {
+    const beginMatch = result.match(/-----BEGIN [^-]+-----/);
+    const endMatch = result.match(/-----END [^-]+-----/);
+    if (beginMatch && endMatch) {
+      const begin = beginMatch[0];
+      const end = endMatch[0];
+      const middle = result
+        .slice(begin.length, result.indexOf(end))
+        .replace(/\s/g, '');
+      const wrapped = middle.match(/.{1,64}/g)?.join('\n') ?? middle;
+      result = `${begin}\n${wrapped}\n${end}`;
+    }
+  }
+
+  return result;
 }
 
 function getPemLabel(value: string): string {
@@ -281,8 +302,12 @@ async function getSigningContext(): Promise<SigningContext> {
         privateKey = await importKeyFromPEM(privatePem, 'EdDSA');
       } catch (error) {
         const reason = error instanceof Error ? error.message : 'unknown import error';
+        const vercelHint =
+          /asn1|wrong tag|encoding/i.test(reason)
+            ? ' On Vercel: use \\n for newlines in the env var value, not literal line breaks.'
+            : '';
         throw new Error(
-          `Invalid KYA_SIGNING_PRIVATE_PEM. Expected Ed25519 PKCS8 private key PEM. ${reason}`
+          `Invalid KYA_SIGNING_PRIVATE_PEM. Expected Ed25519 PKCS8 private key PEM. ${reason}${vercelHint}`
         );
       }
 
@@ -380,7 +405,7 @@ function buildIncomingRequest(req: NextRequest): IncomingHttpRequest {
 export async function createSignedBelticHeaders(url: string, method = 'GET'): Promise<Record<string, string>> {
   const ctx = await getSigningContext().catch((error) => {
     const reason = error instanceof Error ? error.message : 'unknown error';
-    throw new Error(`Missing local KYA signing context: ${reason}`);
+    throw new Error(`KYA signing unavailable: ${reason}`);
   });
 
   const baseHeaders: Record<string, string> = {
@@ -427,7 +452,7 @@ export async function verifyIncomingBelticRequest(
     return {
       verified: false,
       mode,
-      errors: ['Missing local KYA signing context (public key). Ensure .beltic files exist.'],
+      errors: ['KYA signing unavailable. Set KYA_SIGNING_PRIVATE_PEM and KYA_SIGNING_PUBLIC_PEM, or add key files to .beltic/.'],
       warnings,
     };
   }
