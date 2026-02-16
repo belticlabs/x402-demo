@@ -69,6 +69,11 @@ function buildLocationQueryCandidates(query: string): string[] {
     push(expandLocationAlias(normalized));
   }
 
+  // Open-Meteo geocoding returns 0 results for "City, State, US" but succeeds for "City".
+  // Add the city-only part as a fallback when the query has comma-separated segments.
+  const firstSegment = query.split(',')[0]?.trim();
+  push(firstSegment);
+
   return candidates;
 }
 

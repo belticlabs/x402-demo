@@ -8,7 +8,7 @@
 import { NextRequest } from 'next/server';
 import { getScenario } from '@/lib/scenarios';
 import { fetchWeatherByQuery } from '@/lib/weather';
-import { parseWeatherToolArguments } from '@/lib/location';
+import { parseLegacyToolCallMarkup, parseWeatherToolArguments } from '@/lib/location';
 import { fetchDetailedWeatherThroughX402 } from '@/lib/x402';
 import { createLineBufferParser, parseSseDataLine } from '@/lib/sse';
 import { getConfiguredOpenRouterModel } from '@/lib/openrouter';
@@ -360,7 +360,6 @@ export async function POST(request: NextRequest) {
                   send({ type: 'thinking_end', duration });
                 }
                 fullContent += choice.delta.content;
-                send({ type: 'content', text: choice.delta.content });
               }
 
               // Handle tool calls
@@ -415,7 +414,6 @@ export async function POST(request: NextRequest) {
                 send({ type: 'thinking_end', duration });
               }
               fullContent += choice.delta.content;
-              send({ type: 'content', text: choice.delta.content });
             }
 
             if (choice.delta.tool_calls) {
@@ -463,7 +461,6 @@ export async function POST(request: NextRequest) {
                 send({ type: 'thinking_end', duration });
               }
               fullContent += choice.delta.content;
-              send({ type: 'content', text: choice.delta.content });
             }
 
             if (choice.delta.tool_calls) {
@@ -501,6 +498,23 @@ export async function POST(request: NextRequest) {
           if (!hasEndedThinking) {
             const duration = (Date.now() - thinkingStartTime) / 1000;
             send({ type: 'thinking_end', duration });
+          }
+
+          // Some models emit tool markup in plain text instead of tool_calls.
+          // Convert that markup into a synthetic tool call instead of streaming raw tags.
+          if (toolCalls.length === 0) {
+            const legacyTool = parseLegacyToolCallMarkup(fullContent);
+            if (legacyTool) {
+              toolCalls.push({
+                id: `tool-fallback-${Date.now()}`,
+                type: 'function',
+                function: {
+                  name: legacyTool.functionName,
+                  arguments: JSON.stringify({ location: legacyTool.location }),
+                },
+              });
+              fullContent = '';
+            }
           }
 
           // If there are tool calls, execute them
@@ -743,6 +757,10 @@ export async function POST(request: NextRequest) {
                 }
               }
             }
+          }
+
+          if (toolCalls.length === 0 && fullContent.trim()) {
+            send({ type: 'content', text: fullContent });
           }
 
           send({ type: 'done' });

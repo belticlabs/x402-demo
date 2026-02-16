@@ -6,6 +6,11 @@ export interface ParsedToolArgs {
   location: string;
 }
 
+export interface LegacyToolCallMarkup {
+  functionName: string;
+  location: string;
+}
+
 const LOCATION_ALIASES: Record<string, string> = {
   sf: 'San Francisco, California, US',
   'san fran': 'San Francisco, California, US',
@@ -108,4 +113,24 @@ export function parseWeatherToolArguments(
   }
 
   return null;
+}
+
+export function parseLegacyToolCallMarkup(content: string): LegacyToolCallMarkup | null {
+  if (!content || !content.includes('<tool_call')) {
+    return null;
+  }
+
+  const functionMatch = content.match(/<function=([a-zA-Z0-9_-]+)>/i);
+  const locationMatch = content.match(/<parameter=location>\s*([^<]+?)\s*<\/parameter>/i);
+  if (!functionMatch?.[1] || !locationMatch?.[1]) {
+    return null;
+  }
+
+  const functionName = functionMatch[1].trim();
+  const location = normalizeAndExpandLocation(locationMatch[1]);
+  if (!functionName || !location) {
+    return null;
+  }
+
+  return { functionName, location };
 }
