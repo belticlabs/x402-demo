@@ -1,4 +1,5 @@
 import { createPrivateKey, createPublicKey } from 'crypto';
+import { Buffer } from 'buffer';
 import { existsSync, readFileSync, readdirSync, statSync } from 'fs';
 import * as jose from 'jose';
 import {
@@ -91,7 +92,7 @@ function isPemContent(value: string): boolean {
 
 /**
  * Normalize PEM from env vars (Vercel, etc.).
- * - Replaces literal \n with real newlines.
+ * - Replaces literal \n with real newlines (handle double-escaping).
  * - If newlines were stripped (single-line PEM), re-inserts them.
  */
 function normalizePem(value: string): string {
@@ -102,25 +103,49 @@ function normalizePem(value: string): string {
       ? trimmed.slice(1, -1).trim()
       : trimmed;
 
-  // Replace literal two-char sequence \n with actual newlines.
-  let result = unwrapped.replace(/\\n/g, '\n').trim();
+  // Replace literal \n with real newlines (repeat for double-escaping on some platforms).
+  let result = unwrapped;
+  while (result.includes('\\n')) {
+    result = result.replace(/\\n/g, '\n');
+  }
+  result = result.trim();
 
   // If still no newlines (Vercel may strip them), reconstruct PEM structure.
   if (result.includes('-----BEGIN') && result.includes('-----END') && !result.includes('\n')) {
-    const beginMatch = result.match(/-----BEGIN [^-]+-----/);
-    const endMatch = result.match(/-----END [^-]+-----/);
+    const beginMatch = result.match(/-----BEGIN [A-Z0-9 ]+-----/);
+    const endMatch = result.match(/-----END [A-Z0-9 ]+-----/);
     if (beginMatch && endMatch) {
       const begin = beginMatch[0];
       const end = endMatch[0];
-      const middle = result
-        .slice(begin.length, result.indexOf(end))
-        .replace(/\s/g, '');
+      const startIdx = result.indexOf(begin) + begin.length;
+      const endIdx = result.indexOf(end);
+      const middle = result.slice(startIdx, endIdx).replace(/[\s\\]/g, '');
       const wrapped = middle.match(/.{1,64}/g)?.join('\n') ?? middle;
       result = `${begin}\n${wrapped}\n${end}`;
     }
   }
 
   return result;
+}
+
+/** Extract raw DER from PEM (base64 between headers) and import via Node crypto. */
+function importPrivateKeyFromPemOrDer(pem: string): ReturnType<typeof createPrivateKey> {
+  const base64 = pem
+    .replace(/-----BEGIN [A-Z0-9 ]+-----/g, '')
+    .replace(/-----END [A-Z0-9 ]+-----/g, '')
+    .replace(/[^A-Za-z0-9+/=]/g, '');
+  const der = Buffer.from(base64, 'base64');
+  return createPrivateKey({ key: der, format: 'der', type: 'pkcs8' });
+}
+
+/** Extract raw DER from PEM and import public key via Node crypto. */
+function importPublicKeyFromPemOrDer(pem: string): ReturnType<typeof createPublicKey> {
+  const base64 = pem
+    .replace(/-----BEGIN [A-Z0-9 ]+-----/g, '')
+    .replace(/-----END [A-Z0-9 ]+-----/g, '')
+    .replace(/[^A-Za-z0-9+/=]/g, '');
+  const der = Buffer.from(base64, 'base64');
+  return createPublicKey({ key: der, format: 'der', type: 'spki' });
 }
 
 function getPemLabel(value: string): string {
@@ -305,9 +330,13 @@ async function getSigningContext(): Promise<SigningContext> {
         try {
           privateKey = createPrivateKey({ key: privatePem, format: 'pem' }) as jose.KeyLike;
         } catch {
-          const reason =
-            'PEM format invalid. On Vercel: paste the full PEM with \\n for newlines (single line).';
-          throw new Error(`Invalid KYA_SIGNING_PRIVATE_PEM. Expected Ed25519 PKCS8. ${reason}`);
+          try {
+            privateKey = importPrivateKeyFromPemOrDer(privatePem) as jose.KeyLike;
+          } catch {
+            throw new Error(
+              'Invalid KYA_SIGNING_PRIVATE_PEM. Paste the full PEM as one line with \\n for newlines.'
+            );
+          }
         }
       }
 
@@ -318,9 +347,11 @@ async function getSigningContext(): Promise<SigningContext> {
         try {
           publicKey = createPublicKey({ key: publicPem, format: 'pem' }) as jose.KeyLike;
         } catch {
-          throw new Error(
-            'Invalid KYA_SIGNING_PUBLIC_PEM. Expected Ed25519 SPKI public key PEM.'
-          );
+          try {
+            publicKey = importPublicKeyFromPemOrDer(publicPem) as jose.KeyLike;
+          } catch {
+            throw new Error('Invalid KYA_SIGNING_PUBLIC_PEM. Paste the full PEM as one line with \\n for newlines.');
+          }
         }
       }
       const publicJwk = await exportPublicKey(publicKey);
