@@ -1,3 +1,4 @@
+import { createPrivateKey, createPublicKey } from 'crypto';
 import { existsSync, readFileSync, readdirSync, statSync } from 'fs';
 import * as jose from 'jose';
 import {
@@ -300,25 +301,27 @@ async function getSigningContext(): Promise<SigningContext> {
       let privateKey: jose.KeyLike;
       try {
         privateKey = await importKeyFromPEM(privatePem, 'EdDSA');
-      } catch (error) {
-        const reason = error instanceof Error ? error.message : 'unknown import error';
-        const vercelHint =
-          /asn1|wrong tag|encoding/i.test(reason)
-            ? ' On Vercel: use \\n for newlines in the env var value, not literal line breaks.'
-            : '';
-        throw new Error(
-          `Invalid KYA_SIGNING_PRIVATE_PEM. Expected Ed25519 PKCS8 private key PEM. ${reason}${vercelHint}`
-        );
+      } catch {
+        try {
+          privateKey = createPrivateKey({ key: privatePem, format: 'pem' }) as jose.KeyLike;
+        } catch {
+          const reason =
+            'PEM format invalid. On Vercel: paste the full PEM with \\n for newlines (single line).';
+          throw new Error(`Invalid KYA_SIGNING_PRIVATE_PEM. Expected Ed25519 PKCS8. ${reason}`);
+        }
       }
 
       let publicKey: jose.KeyLike;
       try {
         publicKey = await importKeyFromPEM(publicPem, 'EdDSA');
-      } catch (error) {
-        const reason = error instanceof Error ? error.message : 'unknown import error';
-        throw new Error(
-          `Invalid KYA_SIGNING_PUBLIC_PEM. Expected Ed25519 SPKI public key PEM. ${reason}`
-        );
+      } catch {
+        try {
+          publicKey = createPublicKey({ key: publicPem, format: 'pem' }) as jose.KeyLike;
+        } catch {
+          throw new Error(
+            'Invalid KYA_SIGNING_PUBLIC_PEM. Expected Ed25519 SPKI public key PEM.'
+          );
+        }
       }
       const publicJwk = await exportPublicKey(publicKey);
       const keyId = await computeJwkThumbprint(publicJwk);
