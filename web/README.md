@@ -6,6 +6,13 @@ This is the publishable web demo for:
 
 Weather supports any city/region/country prompt.
 
+## Public Demo Model
+
+- This is a sponsored **testnet** demo.
+- Payments are sent by a server-side demo wallet configured in env vars.
+- No wallet input or wallet connection is required in the UI.
+- If you fork this repo, configure your own env wallet values.
+
 ## Quickstart (No Auth Wizard Flow)
 
 1. Install dependencies:
@@ -67,6 +74,9 @@ Optional:
 - `CDP_API_KEY_ID`, `CDP_API_KEY_SECRET` (recommended for facilitator settle/verify)
 - `KYA_VERIFICATION_MODE=strict|compat|off`
 - `OPENROUTER_MODEL_ID` (optional explicit runtime model id override)
+- `DEMO_CHAT_DISABLED=true|false` (optional emergency chat kill switch)
+- `DEMO_PAID_FLOW_DISABLED=true|false` (optional emergency paid-flow kill switch)
+- `DEMO_MAX_MESSAGE_CHARS` (optional request-size guard, default `2000`)
 
 ## Model Acceptance Policy
 
@@ -105,6 +115,19 @@ curl "http://localhost:3002/api/x402/weather?location=San%20Francisco&tier=anony
 ```
 
 `/api/x402/weather` is x402-protected and returns `402` without payment headers.
+
+## Proof and Reproducibility
+
+- Repro instructions, expected outputs, and proof artifacts are in `docs/proof.md`.
+- This includes exact setup and request flows to validate anonymous vs verified behavior.
+
+## Abuse Response (No Active Rate Limiting Yet)
+
+- This release does **not** enforce active rate limiting by default.
+- If abuse starts, use the kill switches:
+  - `DEMO_CHAT_DISABLED=true`
+  - `DEMO_PAID_FLOW_DISABLED=true`
+- Then roll out Upstash-backed rate limiting as a follow-up patch.
 
 ## SDK Policy Customization Notes
 

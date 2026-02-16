@@ -101,8 +101,8 @@ function resolveSigningKeyMaterial(belticDir: string): SigningKeyMaterial {
   console.info('[KYA] Resolving signing key material:', {
     hasPrivateEnv: Boolean(rawPrivate),
     hasPublicEnv: Boolean(rawPublic),
-    privatePrefix: rawPrivate?.slice(0, 30),
-    publicPrefix: rawPublic?.slice(0, 30),
+    privateLooksLikePem: Boolean(rawPrivate && isPemContent(normalizePem(rawPrivate))),
+    publicLooksLikePem: Boolean(rawPublic && isPemContent(normalizePem(rawPublic))),
     belticDir,
     belticDirExists: existsSync(belticDir),
   });

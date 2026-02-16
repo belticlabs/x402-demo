@@ -95,6 +95,9 @@ export default function PaymentModal({
               {network}
             </span>
           </div>
+          <p className="text-xs text-[var(--muted-foreground)]">
+            Sponsored testnet payment by demo server wallet.
+          </p>
 
           {/* Discount info for verified */}
           {isVerified && savingsPercent > 0 && (

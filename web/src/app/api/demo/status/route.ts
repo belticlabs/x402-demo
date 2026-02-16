@@ -48,6 +48,9 @@ export async function GET() {
         hasRecipientAddress: Boolean(process.env.RECIPIENT_WALLET_ADDRESS),
         hasCdpApiKeyId: Boolean(process.env.CDP_API_KEY_ID),
         hasCdpApiKeySecret: Boolean(process.env.CDP_API_KEY_SECRET),
+        chatDisabled: process.env.DEMO_CHAT_DISABLED === 'true',
+        paidFlowDisabled: process.env.DEMO_PAID_FLOW_DISABLED === 'true',
+        maxMessageChars: process.env.DEMO_MAX_MESSAGE_CHARS || '2000',
       },
     });
   } catch (error) {

@@ -687,6 +687,9 @@ function UnifiedInput({ onSend, disabled = false }: UnifiedInputProps) {
             )}
           </button>
         </div>
+        <p className="text-xs text-[var(--muted)] text-center">
+          Sponsored testnet payment by demo server wallet on Base Sepolia. No wallet connection required.
+        </p>
       </div>
     </div>
   );

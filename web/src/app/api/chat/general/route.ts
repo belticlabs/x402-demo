@@ -17,6 +17,12 @@ const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 // Nvidia Nemotron Nano - free model
 const MODEL = getConfiguredOpenRouterModel();
 const API_URL = 'https://openrouter.ai/api/v1/chat/completions';
+const CHAT_DISABLED = process.env.DEMO_CHAT_DISABLED === 'true';
+const PAID_FLOW_DISABLED = process.env.DEMO_PAID_FLOW_DISABLED === 'true';
+const MAX_MESSAGE_CHARS = (() => {
+  const parsed = Number(process.env.DEMO_MAX_MESSAGE_CHARS || '2000');
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 2000;
+})();
 
 // Stream event types
 type StreamEvent =
@@ -241,12 +247,41 @@ export async function POST(request: NextRequest) {
     const appUrl = new URL(request.url).origin;
     const body: ChatRequest = await request.json();
     const {
-      message,
+      message: rawMessage,
       history,
       paymentConfirmed,
       paymentSessionId: requestPaymentSessionId,
       paymentAttemptId,
     } = body;
+
+    if (CHAT_DISABLED) {
+      return new Response(
+        JSON.stringify({ error: 'Chat is temporarily disabled by the demo operator' }),
+        { status: 503, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
+    if (typeof rawMessage !== 'string') {
+      return new Response(
+        JSON.stringify({ error: 'message must be a string' }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
+    const message = rawMessage.trim();
+    if (!message) {
+      return new Response(
+        JSON.stringify({ error: 'message is required' }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
+    if (message.length > MAX_MESSAGE_CHARS) {
+      return new Response(
+        JSON.stringify({ error: `message exceeds max length (${MAX_MESSAGE_CHARS})` }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
 
     const scenarioConfig = getScenario('x402-only');
 
@@ -486,6 +521,15 @@ export async function POST(request: NextRequest) {
 
               // Emit tool call event
               send({ type: 'tool_call', name: toolName, args });
+
+              if (toolName === 'get_paid_weather' && PAID_FLOW_DISABLED) {
+                send({
+                  type: 'error',
+                  message:
+                    'Detailed paid weather is temporarily disabled by the demo operator. Please ask for basic weather.',
+                });
+                continue;
+              }
 
               // Handle payment flow for paid weather
               if (toolName === 'get_paid_weather') {
