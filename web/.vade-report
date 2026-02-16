@@ -1,0 +1,45 @@
+# Vercel Web Analytics Implementation
+
+Successfully implemented Vercel Web Analytics for the Next.js App Router project.
+
+## Changes Made
+
+### 1. Package Installation
+- Installed `@vercel/analytics` version 1.6.1 using pnpm
+- Updated `package.json` to include the new dependency
+- Updated `pnpm-lock.yaml` with the new package and its dependencies (874 new packages added to the lockfile)
+
+### 2. Modified Files
+
+#### `src/app/layout.tsx`
+- **Import Added**: Added `import { Analytics } from "@vercel/analytics/next";` at the top of the file
+- **Component Added**: Inserted `<Analytics />` component inside the `<body>` tag, placed after the `<ThemeProvider>{children}</ThemeProvider>` component
+- **Placement Rationale**: The Analytics component is positioned at the end of the body to ensure it doesn't block the rendering of the main content while still capturing all page views
+
+### 3. Code Structure
+The implementation follows Next.js App Router best practices:
+- Analytics component is imported from the Next.js-specific package (`@vercel/analytics/next`)
+- Component is placed in the root layout to track all pages in the application
+- Existing code structure, imports, and styling are preserved
+- No breaking changes to existing functionality
+
+### 4. Verification
+- ✅ Linter ran successfully with no errors introduced by our changes
+- ✅ Package installation completed successfully
+- ✅ TypeScript types are correctly resolved for the Analytics component
+- ℹ️  Build requires environment variables (RECIPIENT_WALLET_ADDRESS) that are project-specific and unrelated to Analytics implementation
+
+## Technical Details
+- **Project Type**: Next.js 16.1.6 with App Router
+- **Package Manager**: pnpm
+- **Analytics Package Version**: @vercel/analytics@1.6.1
+- **Integration Point**: Root layout file (`src/app/layout.tsx`)
+
+## Notes
+The Analytics component will automatically:
+- Track page views across all routes
+- Collect Web Vitals metrics
+- Send data to Vercel Analytics when deployed
+- Work in both development and production environments (with data only sent in production by default)
+
+No additional configuration is required. The analytics will start working once the application is deployed to Vercel.
