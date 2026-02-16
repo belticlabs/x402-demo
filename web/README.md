@@ -12,6 +12,7 @@ Weather supports any city/region/country prompt.
 - Payments are sent by a server-side demo wallet configured in env vars.
 - No wallet input or wallet connection is required in the UI.
 - If you fork this repo, configure your own env wallet values.
+- Location resolution is LLM-first through tool arguments, with lightweight alias fallback (`SF`, `NYC`, `LA`).
 
 ## Quickstart (No Auth Wizard Flow)
 
@@ -77,6 +78,22 @@ Optional:
 - `DEMO_CHAT_DISABLED=true|false` (optional emergency chat kill switch)
 - `DEMO_PAID_FLOW_DISABLED=true|false` (optional emergency paid-flow kill switch)
 - `DEMO_MAX_MESSAGE_CHARS` (optional request-size guard, default `2000`)
+
+## Vercel KYA Env Format
+
+For Vercel deployments, set these env vars directly:
+- `BELTIC_CREDENTIAL_JWT`
+- `KYA_SIGNING_PRIVATE_PEM`
+- `KYA_SIGNING_PUBLIC_PEM`
+
+Use Ed25519 PEM material with newline-preserving formatting. Typical safe format in env values uses escaped newlines:
+
+```bash
+KYA_SIGNING_PRIVATE_PEM=-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----
+KYA_SIGNING_PUBLIC_PEM=-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----
+```
+
+If you see `asn1 encoding routines::wrong tag`, the key content is usually malformed, swapped, or not Ed25519 PEM.
 
 ## Model Acceptance Policy
 

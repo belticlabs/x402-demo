@@ -599,9 +599,9 @@ interface UnifiedInputProps {
 }
 
 const suggestions = [
-  'Ask about the weather in any city, region, or country',
-  'Get detailed weather for a region you care about',
-  'Compare weather at two places',
+  "What's the weather in SF?",
+  'Give me a detailed forecast for NYC',
+  'Compare weather in Tampa, Florida and Miami',
 ];
 
 function UnifiedInput({ onSend, disabled = false }: UnifiedInputProps) {

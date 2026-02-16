@@ -108,3 +108,30 @@ curl http://localhost:3002/api/credential
   - `DEMO_CHAT_DISABLED=true`
   - `DEMO_PAID_FLOW_DISABLED=true`
 - If abuse appears, add Upstash-backed rate limiting in a follow-up patch.
+
+## Troubleshooting
+
+1. Error: `No location match found ...`
+- Retry with explicit place names like `Tampa, Florida, US` or `New York City, New York, US`.
+- Short aliases `SF` / `NYC` / `LA` are supported.
+
+2. Error: `Invalid KYA_SIGNING_PRIVATE_PEM` or `Invalid KYA_SIGNING_PUBLIC_PEM`
+- Verify both env vars are set.
+- Confirm private key is in `KYA_SIGNING_PRIVATE_PEM` and public key in `KYA_SIGNING_PUBLIC_PEM`.
+- Ensure values are Ed25519 PEM blocks with preserved newlines (`\n` in env values is acceptable).
+
+3. Error: `asn1 encoding routines::wrong tag`
+- Usually indicates malformed PEM, wrong key type, or swapped key values.
+- Re-copy key material and check BEGIN/END headers:
+  - `BEGIN PRIVATE KEY` for private key
+  - `BEGIN PUBLIC KEY` for public key
+
+4. Check operator status quickly
+
+```bash
+curl http://localhost:3002/api/demo/status
+```
+
+Look for:
+- `kyaSigningReady: true`
+- `kyaSigningError` empty/undefined

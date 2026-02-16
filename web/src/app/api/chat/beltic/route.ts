@@ -192,6 +192,11 @@ function buildSystemPrompt(info: CredentialInfo): string {
 - Detailed/forecast requests → use get_paid_weather
 - If unclear, ask user preference
 
+**Tool Call Requirement:**
+- Always pass a clean geographic place in the tool \`location\` argument.
+- Prefer canonical names (for example: "Tampa, Florida, US" or "New York City, New York, US").
+- Do not pass the full user sentence as \`location\`.
+
 **Location support:** Users can request weather for any city, region, or country name.
 
 **Your Identity (from Beltic KYA Credential):**

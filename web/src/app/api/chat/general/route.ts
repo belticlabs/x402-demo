@@ -147,6 +147,11 @@ function getSystemPrompt(): string {
 - If the user asks for "detailed weather", "forecast", "humidity", "wind", or comprehensive data → use get_paid_weather
 - If unclear, briefly explain both options and ask which they prefer
 
+**Tool Call Requirement:**
+- Always pass a clean geographic place in the tool \`location\` argument.
+- Prefer canonical names (for example: "Tampa, Florida, US" or "New York City, New York, US").
+- Do not pass the full user sentence as \`location\`.
+
 Users can ask for weather in any city, region, or country.
 
 After getting weather data, present it clearly and mention which tool you used and why.

@@ -6,41 +6,72 @@ export interface ParsedToolArgs {
   location: string;
 }
 
-function trimLocation(value: string | undefined): string | null {
+const LOCATION_ALIASES: Record<string, string> = {
+  sf: 'San Francisco, California, US',
+  'san fran': 'San Francisco, California, US',
+  nyc: 'New York City, New York, US',
+  la: 'Los Angeles, California, US',
+};
+
+function stripOuterQuotes(value: string): string {
+  if (
+    (value.startsWith('"') && value.endsWith('"')) ||
+    (value.startsWith("'") && value.endsWith("'")) ||
+    (value.startsWith('“') && value.endsWith('”')) ||
+    (value.startsWith('‘') && value.endsWith('’'))
+  ) {
+    return value.slice(1, -1).trim();
+  }
+  return value;
+}
+
+export function normalizeLocationInput(value: string | undefined): string | null {
   const trimmed = (value || '').trim();
-  return trimmed.length > 0 ? trimmed : null;
+  if (!trimmed) return null;
+
+  const normalized = stripOuterQuotes(trimmed)
+    .replace(/\s+/g, ' ')
+    .replace(/[.!?;:]+$/g, '')
+    .trim();
+
+  return normalized || null;
+}
+
+export function expandLocationAlias(value: string): string {
+  return LOCATION_ALIASES[value.toLowerCase()] || value;
+}
+
+function normalizeAndExpandLocation(value: string | undefined): string | null {
+  const normalized = normalizeLocationInput(value);
+  if (!normalized) return null;
+  return expandLocationAlias(normalized);
 }
 
 function parseLocationFromToolPayload(rawArguments: string): string | null {
   try {
     const parsed = JSON.parse(rawArguments) as { [key: string]: unknown };
-    if (typeof parsed?.location === 'string') {
-      const location = trimLocation(parsed.location);
-      if (location) return location;
-    }
+    const candidates = ['location', 'query', 'city'] as const;
 
-    if (typeof (parsed as { [key: string]: unknown }).query === 'string') {
-      const query = trimLocation(parsed.query as string);
-      if (query) return query;
-    }
-
-    if (typeof (parsed as { [key: string]: unknown }).city === 'string') {
-      const city = trimLocation((parsed as { [key: string]: unknown }).city as string);
-      if (city) return city;
+    for (const key of candidates) {
+      const value = parsed?.[key];
+      if (typeof value === 'string') {
+        const normalized = normalizeAndExpandLocation(value);
+        if (normalized) return normalized;
+      }
     }
   } catch {
-    // Fallback to quick JSON-shaped regex extraction when parse fails.
+    // Fallback for malformed JSON-like fragments.
   }
 
   const fallbackMatch = rawArguments.match(/"location"\s*:\s*"([^"]+)"/i);
   if (fallbackMatch?.[1]) {
-    const location = trimLocation(fallbackMatch[1]);
+    const location = normalizeAndExpandLocation(fallbackMatch[1]);
     if (location) return location;
   }
 
   const quoteFallbackMatch = rawArguments.match(/'location'\s*:\s*'([^']+)'/i);
   if (quoteFallbackMatch?.[1]) {
-    const location = trimLocation(quoteFallbackMatch[1]);
+    const location = normalizeAndExpandLocation(quoteFallbackMatch[1]);
     if (location) return location;
   }
 
@@ -48,36 +79,33 @@ function parseLocationFromToolPayload(rawArguments: string): string | null {
 }
 
 function parseLocationFromMessage(message: string): string | null {
-  const patterns = [
-    /weather\s+(?:for|in|at|around)\s+([^.!?,;:]+?)(?:\s+today|\s+tomorrow|\s+now)?$/i,
-    /forecast\s+(?:for|in|at|around)\s+([^.!?,;:]+?)(?:\s+today|\s+tomorrow|\s+now)?$/i,
-    /(?:in|for|at|around)\s+([A-Z][A-Za-z\s.'-]+)(?:\s+right now|\s+today|\s+now|\s+please|\s+thanks)?[.!?]?$/,
-  ];
-
-  const normalized = message.trim();
+  const normalized = normalizeLocationInput(message);
   if (!normalized) return null;
 
-  for (const pattern of patterns) {
-    const match = normalized.match(pattern);
-    if (match?.[1]) {
-      const location = trimLocation(match[1]);
-      if (location) return location;
-    }
-  }
+  // Lightweight fallback only. Primary source of truth is tool-call args.
+  const keywordMatch = normalized.match(/\b(?:in|for|at|around|from)\b\s+(.+)$/i);
+  if (!keywordMatch?.[1]) return null;
 
-  return null;
+  const candidate = keywordMatch[1]
+    .replace(/\b(?:please|thanks|thank you|detailed)\b/gi, '')
+    .trim();
+
+  return normalizeAndExpandLocation(candidate);
 }
 
 export function parseWeatherToolArguments(
   rawArguments: string,
   userMessage: string,
 ): ParsedToolArgs | null {
-  const location =
-    parseLocationFromToolPayload(rawArguments) || parseLocationFromMessage(userMessage);
-
-  if (!location) {
-    return null;
+  const locationFromTool = parseLocationFromToolPayload(rawArguments);
+  if (locationFromTool) {
+    return { location: locationFromTool };
   }
 
-  return { location };
+  const locationFromMessage = parseLocationFromMessage(userMessage);
+  if (locationFromMessage) {
+    return { location: locationFromMessage };
+  }
+
+  return null;
 }

@@ -90,8 +90,48 @@ function isPemContent(value: string): boolean {
 
 /** Normalize literal \n sequences to real newlines (common in env vars). */
 function normalizePem(value: string): string {
-  // Replace literal two-char sequence \n with actual newlines
-  return value.replace(/\\n/g, '\n').trim();
+  const trimmed = value.trim();
+  const unwrapped =
+    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+      ? trimmed.slice(1, -1).trim()
+      : trimmed;
+
+  // Replace literal two-char sequence \n with actual newlines.
+  return unwrapped.replace(/\\n/g, '\n').trim();
+}
+
+function getPemLabel(value: string): string {
+  const match = value.match(/-----BEGIN ([A-Z0-9 ]+)-----/);
+  return match?.[1] || 'UNKNOWN';
+}
+
+function assertExpectedPemFormat(
+  value: string,
+  envName: 'KYA_SIGNING_PRIVATE_PEM' | 'KYA_SIGNING_PUBLIC_PEM'
+) {
+  if (!isPemContent(value)) {
+    throw new Error(
+      `${envName} must be inline PEM content (BEGIN/END block) or a valid file path.`
+    );
+  }
+
+  const label = getPemLabel(value);
+  if (envName === 'KYA_SIGNING_PRIVATE_PEM') {
+    const validPrivateLabel = label === 'PRIVATE KEY' || label === 'ED25519 PRIVATE KEY';
+    if (!validPrivateLabel) {
+      throw new Error(
+        `${envName} must be an Ed25519 private key PEM (BEGIN PRIVATE KEY). Received: BEGIN ${label}.`
+      );
+    }
+    return;
+  }
+
+  if (label !== 'PUBLIC KEY') {
+    throw new Error(
+      `${envName} must be an Ed25519 public key PEM (BEGIN PUBLIC KEY). Received: BEGIN ${label}.`
+    );
+  }
 }
 
 function resolveSigningKeyMaterial(belticDir: string): SigningKeyMaterial {
@@ -121,8 +161,17 @@ function resolveSigningKeyMaterial(belticDir: string): SigningKeyMaterial {
 
     // If values look like PEM content, use directly (Vercel env var flow)
     if (privateIsPem && publicIsPem) {
+      assertExpectedPemFormat(explicitPrivate, 'KYA_SIGNING_PRIVATE_PEM');
+      assertExpectedPemFormat(explicitPublic, 'KYA_SIGNING_PUBLIC_PEM');
       return { privatePem: explicitPrivate, publicPem: explicitPublic };
     }
+
+    if (privateIsPem !== publicIsPem) {
+      throw new Error(
+        'KYA_SIGNING_PRIVATE_PEM and KYA_SIGNING_PUBLIC_PEM must both be inline PEM values or both be file paths'
+      );
+    }
+
     // Otherwise treat as file paths
     if (!existsSync(explicitPrivate)) {
       throw new Error(`KYA_SIGNING_PRIVATE_PEM not found: ${explicitPrivate}`);
@@ -227,8 +276,25 @@ async function getSigningContext(): Promise<SigningContext> {
       const belticDir = findBelticDir();
       const { privatePem, publicPem } = resolveSigningKeyMaterial(belticDir);
 
-      const privateKey = await importKeyFromPEM(privatePem, 'EdDSA');
-      const publicKey = await importKeyFromPEM(publicPem, 'EdDSA');
+      let privateKey: jose.KeyLike;
+      try {
+        privateKey = await importKeyFromPEM(privatePem, 'EdDSA');
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : 'unknown import error';
+        throw new Error(
+          `Invalid KYA_SIGNING_PRIVATE_PEM. Expected Ed25519 PKCS8 private key PEM. ${reason}`
+        );
+      }
+
+      let publicKey: jose.KeyLike;
+      try {
+        publicKey = await importKeyFromPEM(publicPem, 'EdDSA');
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : 'unknown import error';
+        throw new Error(
+          `Invalid KYA_SIGNING_PUBLIC_PEM. Expected Ed25519 SPKI public key PEM. ${reason}`
+        );
+      }
       const publicJwk = await exportPublicKey(publicKey);
       const keyId = await computeJwkThumbprint(publicJwk);
 

@@ -2,6 +2,8 @@
  * Weather and geocoding helpers used by chat and paid API routes.
  */
 
+import { expandLocationAlias, normalizeLocationInput } from '@/lib/location';
+
 export interface ResolvedLocation {
   query: string;
   name: string;
@@ -46,41 +48,71 @@ function buildLocationLabel(raw: {
   return [raw.name, raw.admin1, raw.country].filter(Boolean).join(', ');
 }
 
+function buildLocationQueryCandidates(query: string): string[] {
+  const candidates: string[] = [];
+  const seen = new Set<string>();
+
+  const push = (value: string | null | undefined) => {
+    if (!value) return;
+    const normalized = value.trim();
+    if (!normalized) return;
+    const key = normalized.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    candidates.push(normalized);
+  };
+
+  push(query);
+  const normalized = normalizeLocationInput(query);
+  push(normalized);
+  if (normalized) {
+    push(expandLocationAlias(normalized));
+  }
+
+  return candidates;
+}
+
 export async function resolveLocation(query: string): Promise<ResolvedLocation> {
   const trimmed = query.trim();
   if (!trimmed) {
     throw new Error('Location is required');
   }
 
-  const params = new URLSearchParams({
-    name: trimmed,
-    count: '1',
-    language: 'en',
-    format: 'json',
-  });
+  const candidates = buildLocationQueryCandidates(trimmed);
 
-  const response = await fetch(`https://geocoding-api.open-meteo.com/v1/search?${params.toString()}`);
-  if (!response.ok) {
-    throw new Error(`Geocoding failed (${response.status})`);
+  for (const candidate of candidates) {
+    const params = new URLSearchParams({
+      name: candidate,
+      count: '1',
+      language: 'en',
+      format: 'json',
+    });
+
+    const response = await fetch(`https://geocoding-api.open-meteo.com/v1/search?${params.toString()}`);
+    if (!response.ok) {
+      throw new Error(`Geocoding failed (${response.status})`);
+    }
+
+    const data = await response.json();
+    const first = data?.results?.[0] as
+      | { latitude: number; longitude: number; name?: string; admin1?: string; country?: string }
+      | undefined;
+
+    if (!first) {
+      continue;
+    }
+
+    return {
+      query: trimmed,
+      name: buildLocationLabel(first) || candidate,
+      latitude: first.latitude,
+      longitude: first.longitude,
+      country: first.country,
+      admin1: first.admin1,
+    };
   }
 
-  const data = await response.json();
-  const first = data?.results?.[0] as
-    | { latitude: number; longitude: number; name?: string; admin1?: string; country?: string }
-    | undefined;
-
-  if (!first) {
-    throw new Error(`No location match found for "${trimmed}"`);
-  }
-
-  return {
-    query: trimmed,
-    name: buildLocationLabel(first) || trimmed,
-    latitude: first.latitude,
-    longitude: first.longitude,
-    country: first.country,
-    admin1: first.admin1,
-  };
+  throw new Error(`No location match found for "${trimmed}"`);
 }
 
 export async function fetchWeatherByQuery(
