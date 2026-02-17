@@ -120,9 +120,14 @@ curl http://localhost:3002/api/credential
 - Confirm private key is in `KYA_SIGNING_PRIVATE_PEM` and public key in `KYA_SIGNING_PUBLIC_PEM`.
 - Ensure values are Ed25519 PEM blocks with preserved newlines (`\n` in env values is acceptable).
 
-3. Error: `asn1 encoding routines::wrong tag`
-- Usually indicates malformed PEM, wrong key type, or swapped key values.
-- **On Vercel**: Use `\n` for newlines in the env var value (e.g. `-----BEGIN PRIVATE KEY-----\nM...\n-----END PRIVATE KEY-----`), not literal line breaks.
+3. Error: `asn1 encoding routines::wrong tag` or PEM import failures on Vercel
+- **On Vercel**: Vercel mangles multiline env vars. Use base64 encoding instead:
+  ```bash
+  cat .beltic/*-private.pem | base64
+  cat .beltic/*-public.pem | base64
+  ```
+  Paste each output into `KYA_SIGNING_PRIVATE_PEM` and `KYA_SIGNING_PUBLIC_PEM` in Vercel. The app auto-detects and decodes base64.
+- Otherwise: Use `\n` for newlines (single-line PEM), not literal line breaks.
 - Re-copy key material and check BEGIN/END headers:
   - `BEGIN PRIVATE KEY` for private key
   - `BEGIN PUBLIC KEY` for public key

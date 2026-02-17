@@ -181,21 +181,40 @@ function assertExpectedPemFormat(
   }
 }
 
+/**
+ * If value doesn't look like PEM, try base64 decode (Vercel-safe: newlines preserved).
+ * See: https://github.com/vercel/vercel/issues/749
+ */
+function maybeDecodeBase64Pem(value: string): string {
+  const trimmed = value.trim();
+  if (trimmed.startsWith('-----BEGIN')) return trimmed;
+  try {
+    const decoded = Buffer.from(trimmed, 'base64').toString('utf8');
+    if (decoded.startsWith('-----BEGIN')) return decoded;
+  } catch {
+    // Not valid base64, return as-is
+  }
+  return trimmed;
+}
+
 function resolveSigningKeyMaterial(belticDir: string): SigningKeyMaterial {
   const rawPrivate = process.env.KYA_SIGNING_PRIVATE_PEM?.trim();
   const rawPublic = process.env.KYA_SIGNING_PUBLIC_PEM?.trim();
 
+  const decodedPrivate = rawPrivate ? maybeDecodeBase64Pem(rawPrivate) : undefined;
+  const decodedPublic = rawPublic ? maybeDecodeBase64Pem(rawPublic) : undefined;
+
   console.info('[KYA] Resolving signing key material:', {
     hasPrivateEnv: Boolean(rawPrivate),
     hasPublicEnv: Boolean(rawPublic),
-    privateLooksLikePem: Boolean(rawPrivate && isPemContent(normalizePem(rawPrivate))),
-    publicLooksLikePem: Boolean(rawPublic && isPemContent(normalizePem(rawPublic))),
+    privateLooksLikePem: Boolean(decodedPrivate && isPemContent(normalizePem(decodedPrivate))),
+    publicLooksLikePem: Boolean(decodedPublic && isPemContent(normalizePem(decodedPublic))),
     belticDir,
     belticDirExists: existsSync(belticDir),
   });
 
-  const explicitPrivate = rawPrivate ? normalizePem(rawPrivate) : undefined;
-  const explicitPublic = rawPublic ? normalizePem(rawPublic) : undefined;
+  const explicitPrivate = decodedPrivate ? normalizePem(decodedPrivate) : undefined;
+  const explicitPublic = decodedPublic ? normalizePem(decodedPublic) : undefined;
 
   if ((explicitPrivate && !explicitPublic) || (!explicitPrivate && explicitPublic)) {
     throw new Error('Set both KYA_SIGNING_PRIVATE_PEM and KYA_SIGNING_PUBLIC_PEM together');
