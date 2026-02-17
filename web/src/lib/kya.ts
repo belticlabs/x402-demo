@@ -174,8 +174,9 @@ function parsePemBlock(value: string): ParsedPemBlock | null {
 }
 
 function canImportPemKey(value: string, envName: SigningPemEnvName): boolean {
+  const pem = normalizePem(value);
+
   try {
-    const pem = normalizePem(value);
     if (envName === 'KYA_SIGNING_PRIVATE_PEM') {
       createPrivateKey({ key: pem, format: 'pem' });
       return true;
@@ -183,7 +184,18 @@ function canImportPemKey(value: string, envName: SigningPemEnvName): boolean {
     createPublicKey({ key: pem, format: 'pem' });
     return true;
   } catch {
-    return false;
+    // Some runtimes reject non-standard PEM labels (for example ED25519 PRIVATE KEY),
+    // even when the underlying DER is valid PKCS8/SPKI. Try DER import fallback.
+    try {
+      if (envName === 'KYA_SIGNING_PRIVATE_PEM') {
+        importPrivateKeyFromPemOrDer(pem);
+        return true;
+      }
+      importPublicKeyFromPemOrDer(pem);
+      return true;
+    } catch {
+      return false;
+    }
   }
 }
 
@@ -360,7 +372,14 @@ function resolveSigningKeyMaterial(belticDir: string): SigningKeyMaterial {
   if (explicitPrivate && explicitPublic) {
     const privateIsPem = isPemContent(explicitPrivate);
     const publicIsPem = isPemContent(explicitPublic);
-    console.info('[KYA] PEM content detection:', { privateIsPem, publicIsPem });
+    const privatePemLabel = privateIsPem ? parsePemBlock(explicitPrivate)?.label : undefined;
+    const publicPemLabel = publicIsPem ? parsePemBlock(explicitPublic)?.label : undefined;
+    console.info('[KYA] PEM content detection:', {
+      privateIsPem,
+      publicIsPem,
+      privatePemLabel,
+      publicPemLabel,
+    });
 
     // If values look like PEM content, use directly (Vercel env var flow)
     if (privateIsPem && publicIsPem) {
