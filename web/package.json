@@ -9,7 +9,8 @@
     "lint": "eslint",
     "smoke:platform": "node scripts/smoke-platform.mjs",
     "bootstrap:wizard-local": "npx @belticlabs/wizard --local --install-dir .",
-    "check:setup": "node scripts/check-setup.mjs"
+    "check:setup": "node scripts/check-setup.mjs",
+    "vercel:export-keys": "node scripts/vercel-export-keys.mjs"
   },
   "dependencies": {
     "@belticlabs/kya": "^1.3.3",

@@ -204,8 +204,29 @@ function assertExpectedPemFormat(value: string, envName: SigningPemEnvName) {
   }
 }
 
+/** Decode base64 to string; returns null on failure. */
+function tryBase64Decode(value: string): string | null {
+  try {
+    const trimmed = value.replace(/\s/g, '');
+    if (!/^[A-Za-z0-9+/=]+$/.test(trimmed)) return null;
+    return Buffer.from(trimmed, 'base64').toString('utf8');
+  } catch {
+    return null;
+  }
+}
+
 function resolveEnvPemValue(value: string, jsonField: 'privateKey' | 'publicKey'): string {
   const unwrapped = unquoteEnvValue(value);
+
+  // base64: prefix (README documents this)
+  if (unwrapped.toLowerCase().startsWith('base64:')) {
+    const b64 = unwrapped.slice(7).trim();
+    const decoded = tryBase64Decode(b64);
+    if (!decoded || !decoded.includes('-----BEGIN')) {
+      throw new Error(`base64: value does not decode to valid PEM (missing -----BEGIN block)`);
+    }
+    return normalizePemLineEndings(decoded);
+  }
 
   if (unwrapped.startsWith('{')) {
     try {
@@ -214,10 +235,19 @@ function resolveEnvPemValue(value: string, jsonField: 'privateKey' | 'publicKey'
       if (typeof jsonValue !== 'string' || !jsonValue.trim()) {
         throw new Error(`JSON object is missing "${jsonField}"`);
       }
-      return unquoteEnvValue(jsonValue).replace(/\\n/g, '\n').trim();
+      const inner = unquoteEnvValue(jsonValue).replace(/\\n/g, '\n').trim();
+      return normalizePemLineEndings(inner);
     } catch (error) {
       const reason = error instanceof Error ? error.message : 'invalid JSON';
       throw new Error(`Invalid JSON format for ${jsonField}: ${reason}`);
+    }
+  }
+
+  // Raw base64 (no headers) — try decode; README says "paste only the base64 value"
+  if (!unwrapped.startsWith('-----BEGIN')) {
+    const decoded = tryBase64Decode(unwrapped);
+    if (decoded?.includes('-----BEGIN')) {
+      return normalizePemLineEndings(decoded);
     }
   }
 
@@ -230,7 +260,12 @@ function resolveEnvPemValue(value: string, jsonField: 'privateKey' | 'publicKey'
       hadEscapedNewlines: unwrapped.includes('\\n'),
     });
   }
-  return resolved;
+  return normalizePemLineEndings(resolved);
+}
+
+/** Normalize line endings so PEM parses reliably across platforms. */
+function normalizePemLineEndings(pem: string): string {
+  return pem.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
 }
 
 function resolveSigningKeyMaterial(belticDir: string): SigningKeyMaterial {
@@ -290,8 +325,8 @@ function resolveSigningKeyMaterial(belticDir: string): SigningKeyMaterial {
       throw new Error(`KYA_SIGNING_PUBLIC_PEM not found: ${explicitPublic}`);
     }
     return {
-      privatePem: readFileSync(explicitPrivate, 'utf-8'),
-      publicPem: readFileSync(explicitPublic, 'utf-8'),
+      privatePem: normalizePemLineEndings(readFileSync(explicitPrivate, 'utf-8')),
+      publicPem: normalizePemLineEndings(readFileSync(explicitPublic, 'utf-8')),
     };
   }
 
@@ -330,8 +365,8 @@ function resolveSigningKeyMaterial(belticDir: string): SigningKeyMaterial {
 
   candidates.sort((a, b) => b.modifiedAt - a.modifiedAt);
   return {
-    privatePem: readFileSync(candidates[0].privatePemPath, 'utf-8'),
-    publicPem: readFileSync(candidates[0].publicPemPath, 'utf-8'),
+    privatePem: normalizePemLineEndings(readFileSync(candidates[0].privatePemPath, 'utf-8')),
+    publicPem: normalizePemLineEndings(readFileSync(candidates[0].publicPemPath, 'utf-8')),
   };
 }
 
