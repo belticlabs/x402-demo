@@ -136,7 +136,9 @@ function canImportPemKey(pem: string, envName: SigningPemEnvName): boolean {
     }
     createPublicKey({ key: pem, format: 'pem' });
     return true;
-  } catch {
+  } catch (pemErr) {
+    const pemMsg = pemErr instanceof Error ? pemErr.message : String(pemErr);
+    console.warn(`[KYA] PEM import failed (${envName}):`, pemMsg);
     // Some runtimes reject non-standard PEM labels (for example ED25519 PRIVATE KEY),
     // even when the underlying DER is valid PKCS8/SPKI. Try DER import fallback.
     try {
@@ -146,7 +148,9 @@ function canImportPemKey(pem: string, envName: SigningPemEnvName): boolean {
       }
       importPublicKeyFromPemOrDer(pem);
       return true;
-    } catch {
+    } catch (derErr) {
+      const derMsg = derErr instanceof Error ? derErr.message : String(derErr);
+      console.warn(`[KYA] DER fallback failed (${envName}):`, derMsg);
       return false;
     }
   }
@@ -165,6 +169,13 @@ function assertExpectedPemFormat(value: string, envName: SigningPemEnvName) {
         `${envName} must be an Ed25519 private key PEM (BEGIN PRIVATE KEY). Received: BEGIN ${label}.`
       );
     }
+    console.info('[KYA] Private PEM pre-check:', {
+      length: value.length,
+      expectedMinLength: 165,
+      hasNewlines: value.includes('\n'),
+      startsCorrect: value.trimStart().startsWith('-----BEGIN'),
+      endsCorrect: value.trimEnd().endsWith('-----'),
+    });
     if (!canImportPemKey(value, envName)) {
       throw new Error(
         `${envName} is not a valid Ed25519 private key PEM. Value may be truncated or corrupted in env storage.`
@@ -179,6 +190,13 @@ function assertExpectedPemFormat(value: string, envName: SigningPemEnvName) {
     );
   }
 
+  console.info('[KYA] Public PEM pre-check:', {
+    length: value.length,
+    expectedMinLength: 100,
+    hasNewlines: value.includes('\n'),
+    startsCorrect: value.trimStart().startsWith('-----BEGIN'),
+    endsCorrect: value.trimEnd().endsWith('-----'),
+  });
   if (!canImportPemKey(value, envName)) {
     throw new Error(
       `${envName} is not a valid Ed25519 public key PEM. Value may be truncated or corrupted in env storage.`
@@ -204,7 +222,15 @@ function resolveEnvPemValue(value: string, jsonField: 'privateKey' | 'publicKey'
   }
 
   // Expected explicit format: single-line PEM with escaped newlines (\n)
-  return unwrapped.replace(/\\n/g, '\n').trim();
+  const resolved = unwrapped.replace(/\\n/g, '\n').trim();
+  if (!resolved.includes('-----END')) {
+    console.warn('[KYA] Resolved PEM missing -----END block (possible truncation):', {
+      inputLength: unwrapped.length,
+      outputLength: resolved.length,
+      hadEscapedNewlines: unwrapped.includes('\\n'),
+    });
+  }
+  return resolved;
 }
 
 function resolveSigningKeyMaterial(belticDir: string): SigningKeyMaterial {
@@ -217,8 +243,10 @@ function resolveSigningKeyMaterial(belticDir: string): SigningKeyMaterial {
   console.info('[KYA] Resolving signing key material:', {
     hasPrivateEnv: Boolean(rawPrivate),
     hasPublicEnv: Boolean(rawPublic),
-    privateEnvLength: explicitPrivate?.length ?? 0,
-    publicEnvLength: explicitPublic?.length ?? 0,
+    rawPrivateLength: rawPrivate?.length ?? 0,
+    rawPublicLength: rawPublic?.length ?? 0,
+    resolvedPrivateLength: explicitPrivate?.length ?? 0,
+    resolvedPublicLength: explicitPublic?.length ?? 0,
     privateLooksLikePem: Boolean(explicitPrivate && isPemContent(explicitPrivate)),
     publicLooksLikePem: Boolean(explicitPublic && isPemContent(explicitPublic)),
     belticDir,
