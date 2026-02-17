@@ -95,6 +95,29 @@ curl http://localhost:3002/api/credential
 3. At least one Base Sepolia tx hash from each scenario path.
 4. `/api/demo/status` output showing env readiness and mode flags.
 
+## Vercel Deployment — Base64 PEM Keys
+
+Vercel replaces newlines with spaces in env vars, which breaks inline PEM. Use **base64-encoded PEM**:
+
+1. **Generate base64 values** (from repo root):
+
+   ```bash
+   cd web && pnpm vercel:export-keys
+   ```
+
+   Or manually:
+   ```bash
+   base64 < .beltic/*-private.pem   # paste into KYA_SIGNING_PRIVATE_PEM
+   base64 < .beltic/*-public.pem    # paste into KYA_SIGNING_PUBLIC_PEM
+   ```
+
+2. In Vercel: Project → Settings → Environment Variables.
+3. Add `KYA_SIGNING_PRIVATE_PEM` = the base64 string (no `-----BEGIN`, no newlines).
+4. Add `KYA_SIGNING_PUBLIC_PEM` = the base64 string.
+5. Redeploy.
+
+The app detects non-PEM values and base64-decodes them automatically.
+
 ## Fork and Use Your Own Wallet
 
 1. Fork repo.
@@ -116,18 +139,13 @@ curl http://localhost:3002/api/credential
 - Short aliases `SF` / `NYC` / `LA` are supported.
 
 2. Error: `Invalid KYA_SIGNING_PRIVATE_PEM` or `Invalid KYA_SIGNING_PUBLIC_PEM`
-- Verify both env vars are set.
-- Confirm private key is in `KYA_SIGNING_PRIVATE_PEM` and public key in `KYA_SIGNING_PUBLIC_PEM`.
-- Ensure values are Ed25519 PEM blocks with preserved newlines (`\n` in env values is acceptable).
+- The error now includes the underlying crypto message — use it to debug.
+- Verify both env vars are set. Confirm private key is in `KYA_SIGNING_PRIVATE_PEM`, public in `KYA_SIGNING_PUBLIC_PEM`.
 
-3. Error: `asn1 encoding routines::wrong tag` or PEM import failures on Vercel
-- **On Vercel**: Vercel mangles multiline env vars. Use base64 encoding instead:
-  ```bash
-  cat .beltic/*-private.pem | base64
-  cat .beltic/*-public.pem | base64
-  ```
-  Paste each output into `KYA_SIGNING_PRIVATE_PEM` and `KYA_SIGNING_PUBLIC_PEM` in Vercel. The app auto-detects and decodes base64.
-- Otherwise: Use `\n` for newlines (single-line PEM), not literal line breaks.
+3. PEM import failures on Vercel (asn1, wrong tag, etc.)
+- **Use base64**: Run `pnpm vercel:export-keys` and paste **only** the base64 lines (not the `KYA_SIGNING_*=` labels).
+- Ensure no extra spaces/newlines when pasting into Vercel. Copy the base64 string only.
+- If raw base64 fails, try prefixing the value with `base64:` (e.g. `base64:LS0tLS1CRUdJTi...`).
 - Re-copy key material and check BEGIN/END headers:
   - `BEGIN PRIVATE KEY` for private key
   - `BEGIN PUBLIC KEY` for public key

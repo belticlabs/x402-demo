@@ -96,7 +96,8 @@ function isPemContent(value: string): boolean {
  * - If newlines were stripped (single-line PEM), re-inserts them.
  */
 function normalizePem(value: string): string {
-  const trimmed = value.trim();
+  // Normalize line endings (Windows CRLF, old Mac \r)
+  let trimmed = value.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
   const unwrapped =
     (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
     (trimmed.startsWith("'") && trimmed.endsWith("'"))
@@ -104,7 +105,7 @@ function normalizePem(value: string): string {
       : trimmed;
 
   // Replace literal \n with real newlines (repeat for double-escaping on some platforms).
-  let result = unwrapped;
+  let result = unwrapped.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
   while (result.includes('\\n')) {
     result = result.replace(/\\n/g, '\n');
   }
@@ -184,15 +185,31 @@ function assertExpectedPemFormat(
 /**
  * If value doesn't look like PEM, try base64 decode (Vercel-safe: newlines preserved).
  * See: https://github.com/vercel/vercel/issues/749
+ * Supports: raw base64, or base64:... prefix to force decode.
+ * Vercel may add spaces/newlines to env vars — strip them before decoding.
  */
 function maybeDecodeBase64Pem(value: string): string {
   const trimmed = value.trim();
   if (trimmed.startsWith('-----BEGIN')) return trimmed;
+  // If user pasted "KYA_SIGNING_PRIVATE_PEM=<base64>" by mistake, use the part after =
+  // Only strip when it looks like KEY= (short key name), not base64 (base64 ends with =)
+  let base64Input = trimmed;
+  const eq = trimmed.indexOf('=');
+  if (eq > 0 && eq < 50 && /^[A-Za-z0-9_]+$/.test(trimmed.slice(0, eq))) {
+    base64Input = trimmed.slice(eq + 1).trim();
+  }
+  const forceBase64 = base64Input.toLowerCase().startsWith('base64:');
+  base64Input = forceBase64 ? base64Input.slice(7).trim() : base64Input;
   try {
-    const decoded = Buffer.from(trimmed, 'base64').toString('utf8');
+    // Strip any whitespace Vercel may inject (spaces, newlines)
+    const base64 = base64Input.replace(/\s/g, '');
+    const decoded = Buffer.from(base64, 'base64').toString('utf8');
     if (decoded.startsWith('-----BEGIN')) return decoded;
-  } catch {
-    // Not valid base64, return as-is
+    if (forceBase64) {
+      throw new Error('base64: prefix used but decoded value is not PEM');
+    }
+  } catch (e) {
+    if (forceBase64) throw e;
   }
   return trimmed;
 }
@@ -351,9 +368,10 @@ async function getSigningContext(): Promise<SigningContext> {
         } catch {
           try {
             privateKey = importPrivateKeyFromPemOrDer(privatePem) as jose.KeyLike;
-          } catch {
+          } catch (e3) {
+            const err = e3 instanceof Error ? e3 : new Error(String(e3));
             throw new Error(
-              'Invalid KYA_SIGNING_PRIVATE_PEM. Paste the full PEM as one line with \\n for newlines.'
+              `Invalid KYA_SIGNING_PRIVATE_PEM: ${err.message}. On Vercel use base64 (pnpm vercel:export-keys).`
             );
           }
         }
@@ -368,8 +386,11 @@ async function getSigningContext(): Promise<SigningContext> {
         } catch {
           try {
             publicKey = importPublicKeyFromPemOrDer(publicPem) as jose.KeyLike;
-          } catch {
-            throw new Error('Invalid KYA_SIGNING_PUBLIC_PEM. Paste the full PEM as one line with \\n for newlines.');
+          } catch (e3) {
+            const err = e3 instanceof Error ? e3 : new Error(String(e3));
+            throw new Error(
+              `Invalid KYA_SIGNING_PUBLIC_PEM: ${err.message}. On Vercel use base64 (pnpm vercel:export-keys).`
+            );
           }
         }
       }
