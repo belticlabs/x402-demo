@@ -253,10 +253,15 @@ function buildBase64Candidates(value: string): string[] {
 }
 
 function assertExpectedPemFormat(
+
   value: string,
   envName: SigningPemEnvName
 ) {
   const parsed = parsePemBlock(value);
+  console.log('value', value);
+  console.log('envName', envName );
+  console.log('parsed', parsed);
+
   if (!parsed) {
     throw new Error(
       `${envName} must be a complete PEM block with matching BEGIN/END lines.`
