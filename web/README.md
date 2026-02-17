@@ -86,14 +86,21 @@ For Vercel deployments, set these env vars directly:
 - `KYA_SIGNING_PRIVATE_PEM`
 - `KYA_SIGNING_PUBLIC_PEM`
 
-Use Ed25519 PEM material with newline-preserving formatting. Typical safe format in env values uses escaped newlines:
+Use **base64-encoded Ed25519 PEM** (single line). Generate values with:
 
 ```bash
-KYA_SIGNING_PRIVATE_PEM=-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----
-KYA_SIGNING_PUBLIC_PEM=-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----
+pnpm vercel:export-keys
 ```
 
-If you see `asn1 encoding routines::wrong tag`, the key content is usually malformed, swapped, or not Ed25519 PEM.
+Then paste only the base64 value into each env var.
+`base64:` prefix is also supported (for explicit decoding), for example:
+
+```bash
+KYA_SIGNING_PRIVATE_PEM=base64:LS0tLS1CRUdJTiBQUklWQVRFIEtFWS0tLS0t...
+KYA_SIGNING_PUBLIC_PEM=base64:LS0tLS1CRUdJTiBQVUJMSUMgS0VZLS0tLS0...
+```
+
+If you see `asn1 encoding routines::wrong tag`, compare Vercel runtime log lengths (`privateEnvLength`, `privateDecodedLength`, etc.) against local values to detect truncation/mangling.
 
 ## Model Acceptance Policy
 

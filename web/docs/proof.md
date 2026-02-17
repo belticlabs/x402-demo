@@ -146,6 +146,11 @@ The app detects non-PEM values and base64-decodes them automatically.
 - **Use base64**: Run `pnpm vercel:export-keys` and paste **only** the base64 lines (not the `KYA_SIGNING_*=` labels).
 - Ensure no extra spaces/newlines when pasting into Vercel. Copy the base64 string only.
 - If raw base64 fails, try prefixing the value with `base64:` (e.g. `base64:LS0tLS1CRUdJTi...`).
+- Check Vercel runtime logs for:
+  - `privateEnvLength`, `publicEnvLength`
+  - `privateDecodedLength`, `publicDecodedLength`
+  - `privateLooksLikePem`, `publicLooksLikePem`
+  These are safe diagnostics (no key material) and help identify truncation or env overrides.
 - Re-copy key material and check BEGIN/END headers:
   - `BEGIN PRIVATE KEY` for private key
   - `BEGIN PUBLIC KEY` for public key

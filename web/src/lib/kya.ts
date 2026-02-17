@@ -74,6 +74,13 @@ type SigningKeyMaterial = {
   publicPem: string;
 };
 
+type SigningPemEnvName = 'KYA_SIGNING_PRIVATE_PEM' | 'KYA_SIGNING_PUBLIC_PEM';
+
+interface ParsedPemBlock {
+  normalizedPem: string;
+  label: string;
+}
+
 const PRIVATE_SUFFIXES = ['-private.pem', '.private.pem'];
 const PUBLIC_SUFFIXES = ['-public.pem', '.public.pem'];
 
@@ -97,7 +104,7 @@ function isPemContent(value: string): boolean {
  */
 function normalizePem(value: string): string {
   // Normalize line endings (Windows CRLF, old Mac \r)
-  let trimmed = value.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
+  const trimmed = value.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
   const unwrapped =
     (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
     (trimmed.startsWith("'") && trimmed.endsWith("'"))
@@ -149,27 +156,112 @@ function importPublicKeyFromPemOrDer(pem: string): ReturnType<typeof createPubli
   return createPublicKey({ key: der, format: 'der', type: 'spki' });
 }
 
-function getPemLabel(value: string): string {
-  const match = value.match(/-----BEGIN ([A-Z0-9 ]+)-----/);
-  return match?.[1] || 'UNKNOWN';
+function parsePemBlock(value: string): ParsedPemBlock | null {
+  const normalizedPem = normalizePem(value);
+  const match = normalizedPem.match(
+    /^-----BEGIN ([A-Z0-9 ]+)-----\n([A-Za-z0-9+/=\n]+)\n-----END ([A-Z0-9 ]+)-----$/
+  );
+  if (!match) return null;
+
+  const beginLabel = match[1];
+  const endLabel = match[3];
+  if (beginLabel !== endLabel) return null;
+
+  const body = match[2].replace(/\s/g, '');
+  if (!body || !/^[A-Za-z0-9+/]+={0,2}$/.test(body)) return null;
+
+  return { normalizedPem, label: beginLabel };
+}
+
+function canImportPemKey(value: string, envName: SigningPemEnvName): boolean {
+  try {
+    const pem = normalizePem(value);
+    if (envName === 'KYA_SIGNING_PRIVATE_PEM') {
+      createPrivateKey({ key: pem, format: 'pem' });
+      return true;
+    }
+    createPublicKey({ key: pem, format: 'pem' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function stripInlineAssignment(value: string): string {
+  const eq = value.indexOf('=');
+  if (eq > 0 && eq < 50 && /^[A-Za-z0-9_]+$/.test(value.slice(0, eq))) {
+    return value.slice(eq + 1).trim();
+  }
+  return value;
+}
+
+function decodeBase64Utf8(value: string): string | null {
+  if (!value) return null;
+
+  const standard = value.replace(/-/g, '+').replace(/_/g, '/');
+  const base = standard.replace(/=+$/g, '');
+  if (!base || !/^[A-Za-z0-9+/]+$/.test(base)) return null;
+
+  const remainder = base.length % 4;
+  if (remainder === 1) return null;
+
+  const padded = remainder === 0 ? base : `${base}${'='.repeat(4 - remainder)}`;
+  const decoded = Buffer.from(padded, 'base64').toString('utf8');
+  return decoded || null;
+}
+
+function buildBase64Candidates(value: string): string[] {
+  const cleaned = value.replace(/^\uFEFF/, '');
+  const candidates: string[] = [];
+  const seen = new Set<string>();
+
+  const pushCandidate = (input: string) => {
+    const sanitized = input.replace(/[^A-Za-z0-9+/=_-]/g, '');
+    if (!sanitized || seen.has(sanitized)) return;
+    seen.add(sanitized);
+    candidates.push(sanitized);
+  };
+
+  pushCandidate(cleaned);
+
+  // Some env pipelines can turn "+" into spaces; try a recovery variant.
+  if (cleaned.includes(' ') && !cleaned.includes('+')) {
+    pushCandidate(cleaned.replace(/ /g, '+'));
+  }
+
+  if (cleaned.includes('%')) {
+    try {
+      pushCandidate(decodeURIComponent(cleaned));
+    } catch {
+      // Ignore malformed URI encoding and continue with other candidates.
+    }
+  }
+
+  return candidates;
 }
 
 function assertExpectedPemFormat(
   value: string,
-  envName: 'KYA_SIGNING_PRIVATE_PEM' | 'KYA_SIGNING_PUBLIC_PEM'
+  envName: SigningPemEnvName
 ) {
-  if (!isPemContent(value)) {
+  const parsed = parsePemBlock(value);
+  if (!parsed) {
     throw new Error(
-      `${envName} must be inline PEM content (BEGIN/END block) or a valid file path.`
+      `${envName} must be a complete PEM block with matching BEGIN/END lines.`
     );
   }
 
-  const label = getPemLabel(value);
+  const label = parsed.label;
   if (envName === 'KYA_SIGNING_PRIVATE_PEM') {
     const validPrivateLabel = label === 'PRIVATE KEY' || label === 'ED25519 PRIVATE KEY';
     if (!validPrivateLabel) {
       throw new Error(
         `${envName} must be an Ed25519 private key PEM (BEGIN PRIVATE KEY). Received: BEGIN ${label}.`
+      );
+    }
+    if (!canImportPemKey(parsed.normalizedPem, envName)) {
+      throw new Error(
+        `${envName} is not a valid Ed25519 private key PEM. Value may be truncated or corrupted in env storage.`
       );
     }
     return;
@@ -178,6 +270,12 @@ function assertExpectedPemFormat(
   if (label !== 'PUBLIC KEY') {
     throw new Error(
       `${envName} must be an Ed25519 public key PEM (BEGIN PUBLIC KEY). Received: BEGIN ${label}.`
+    );
+  }
+
+  if (!canImportPemKey(parsed.normalizedPem, envName)) {
+    throw new Error(
+      `${envName} is not a valid Ed25519 public key PEM. Value may be truncated or corrupted in env storage.`
     );
   }
 }
@@ -191,26 +289,44 @@ function assertExpectedPemFormat(
 function maybeDecodeBase64Pem(value: string): string {
   const trimmed = value.trim();
   if (trimmed.startsWith('-----BEGIN')) return trimmed;
+
+  const unwrapped =
+    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
+    (trimmed.startsWith("'") && trimmed.endsWith("'"))
+      ? trimmed.slice(1, -1).trim()
+      : trimmed;
+
   // If user pasted "KYA_SIGNING_PRIVATE_PEM=<base64>" by mistake, use the part after =
-  // Only strip when it looks like KEY= (short key name), not base64 (base64 ends with =)
-  let base64Input = trimmed;
-  const eq = trimmed.indexOf('=');
-  if (eq > 0 && eq < 50 && /^[A-Za-z0-9_]+$/.test(trimmed.slice(0, eq))) {
-    base64Input = trimmed.slice(eq + 1).trim();
-  }
+  let base64Input = stripInlineAssignment(unwrapped);
   const forceBase64 = base64Input.toLowerCase().startsWith('base64:');
   base64Input = forceBase64 ? base64Input.slice(7).trim() : base64Input;
-  try {
-    // Strip any whitespace Vercel may inject (spaces, newlines)
-    const base64 = base64Input.replace(/\s/g, '');
-    const decoded = Buffer.from(base64, 'base64').toString('utf8');
-    if (decoded.startsWith('-----BEGIN')) return decoded;
-    if (forceBase64) {
-      throw new Error('base64: prefix used but decoded value is not PEM');
+
+  const candidates = buildBase64Candidates(base64Input);
+  let firstPemCandidate: string | null = null;
+
+  for (const candidate of candidates) {
+    const decoded = decodeBase64Utf8(candidate);
+    if (!decoded || !decoded.trimStart().startsWith('-----BEGIN')) {
+      continue;
     }
-  } catch (e) {
-    if (forceBase64) throw e;
+
+    if (parsePemBlock(decoded)) {
+      return decoded;
+    }
+
+    if (!firstPemCandidate) {
+      firstPemCandidate = decoded;
+    }
   }
+
+  if (forceBase64) {
+    if (firstPemCandidate) {
+      throw new Error('base64: prefix used but decoded value is not a complete PEM block');
+    }
+    throw new Error('base64: prefix used but value is not valid base64');
+  }
+
+  if (firstPemCandidate) return firstPemCandidate;
   return trimmed;
 }
 
@@ -224,6 +340,10 @@ function resolveSigningKeyMaterial(belticDir: string): SigningKeyMaterial {
   console.info('[KYA] Resolving signing key material:', {
     hasPrivateEnv: Boolean(rawPrivate),
     hasPublicEnv: Boolean(rawPublic),
+    privateEnvLength: rawPrivate?.length ?? 0,
+    publicEnvLength: rawPublic?.length ?? 0,
+    privateDecodedLength: decodedPrivate?.length ?? 0,
+    publicDecodedLength: decodedPublic?.length ?? 0,
     privateLooksLikePem: Boolean(decodedPrivate && isPemContent(normalizePem(decodedPrivate))),
     publicLooksLikePem: Boolean(decodedPublic && isPemContent(normalizePem(decodedPublic))),
     belticDir,
