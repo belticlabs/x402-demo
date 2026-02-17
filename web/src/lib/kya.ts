@@ -76,11 +76,6 @@ type SigningKeyMaterial = {
 
 type SigningPemEnvName = 'KYA_SIGNING_PRIVATE_PEM' | 'KYA_SIGNING_PUBLIC_PEM';
 
-interface ParsedPemBlock {
-  normalizedPem: string;
-  label: string;
-}
-
 const PRIVATE_SUFFIXES = ['-private.pem', '.private.pem'];
 const PUBLIC_SUFFIXES = ['-public.pem', '.public.pem'];
 
@@ -97,43 +92,20 @@ function isPemContent(value: string): boolean {
   return value.trimStart().startsWith('-----BEGIN');
 }
 
-/**
- * Normalize PEM from env vars (Vercel, etc.).
- * - Replaces literal \n with real newlines (handle double-escaping).
- * - If newlines were stripped (single-line PEM), re-inserts them.
- */
-function normalizePem(value: string): string {
-  // Normalize line endings (Windows CRLF, old Mac \r)
-  const trimmed = value.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
-  const unwrapped =
+function getPemLabel(value: string): string {
+  const match = value.match(/-----BEGIN ([A-Z0-9 ]+)-----/);
+  return match?.[1] || 'UNKNOWN';
+}
+
+function unquoteEnvValue(value: string): string {
+  const trimmed = value.trim();
+  if (
     (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
     (trimmed.startsWith("'") && trimmed.endsWith("'"))
-      ? trimmed.slice(1, -1).trim()
-      : trimmed;
-
-  // Replace literal \n with real newlines (repeat for double-escaping on some platforms).
-  let result = unwrapped.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-  while (result.includes('\\n')) {
-    result = result.replace(/\\n/g, '\n');
+  ) {
+    return trimmed.slice(1, -1).trim();
   }
-  result = result.trim();
-
-  // If still no newlines (Vercel may strip them), reconstruct PEM structure.
-  if (result.includes('-----BEGIN') && result.includes('-----END') && !result.includes('\n')) {
-    const beginMatch = result.match(/-----BEGIN [A-Z0-9 ]+-----/);
-    const endMatch = result.match(/-----END [A-Z0-9 ]+-----/);
-    if (beginMatch && endMatch) {
-      const begin = beginMatch[0];
-      const end = endMatch[0];
-      const startIdx = result.indexOf(begin) + begin.length;
-      const endIdx = result.indexOf(end);
-      const middle = result.slice(startIdx, endIdx).replace(/[\s\\]/g, '');
-      const wrapped = middle.match(/.{1,64}/g)?.join('\n') ?? middle;
-      result = `${begin}\n${wrapped}\n${end}`;
-    }
-  }
-
-  return result;
+  return trimmed;
 }
 
 /** Extract raw DER from PEM (base64 between headers) and import via Node crypto. */
@@ -156,26 +128,7 @@ function importPublicKeyFromPemOrDer(pem: string): ReturnType<typeof createPubli
   return createPublicKey({ key: der, format: 'der', type: 'spki' });
 }
 
-function parsePemBlock(value: string): ParsedPemBlock | null {
-  const normalizedPem = normalizePem(value);
-  const match = normalizedPem.match(
-    /^-----BEGIN ([A-Z0-9 ]+)-----\n([A-Za-z0-9+/=\n]+)\n-----END ([A-Z0-9 ]+)-----$/
-  );
-  if (!match) return null;
-
-  const beginLabel = match[1];
-  const endLabel = match[3];
-  if (beginLabel !== endLabel) return null;
-
-  const body = match[2].replace(/\s/g, '');
-  if (!body || !/^[A-Za-z0-9+/]+={0,2}$/.test(body)) return null;
-
-  return { normalizedPem, label: beginLabel };
-}
-
-function canImportPemKey(value: string, envName: SigningPemEnvName): boolean {
-  const pem = normalizePem(value);
-
+function canImportPemKey(pem: string, envName: SigningPemEnvName): boolean {
   try {
     if (envName === 'KYA_SIGNING_PRIVATE_PEM') {
       createPrivateKey({ key: pem, format: 'pem' });
@@ -199,76 +152,12 @@ function canImportPemKey(value: string, envName: SigningPemEnvName): boolean {
   }
 }
 
-function stripInlineAssignment(value: string): string {
-  const eq = value.indexOf('=');
-  if (eq > 0 && eq < 50 && /^[A-Za-z0-9_]+$/.test(value.slice(0, eq))) {
-    return value.slice(eq + 1).trim();
-  }
-  return value;
-}
-
-function decodeBase64Utf8(value: string): string | null {
-  if (!value) return null;
-
-  const standard = value.replace(/-/g, '+').replace(/_/g, '/');
-  const base = standard.replace(/=+$/g, '');
-  if (!base || !/^[A-Za-z0-9+/]+$/.test(base)) return null;
-
-  const remainder = base.length % 4;
-  if (remainder === 1) return null;
-
-  const padded = remainder === 0 ? base : `${base}${'='.repeat(4 - remainder)}`;
-  const decoded = Buffer.from(padded, 'base64').toString('utf8');
-  return decoded || null;
-}
-
-function buildBase64Candidates(value: string): string[] {
-  const cleaned = value.replace(/^\uFEFF/, '');
-  const candidates: string[] = [];
-  const seen = new Set<string>();
-
-  const pushCandidate = (input: string) => {
-    const sanitized = input.replace(/[^A-Za-z0-9+/=_-]/g, '');
-    if (!sanitized || seen.has(sanitized)) return;
-    seen.add(sanitized);
-    candidates.push(sanitized);
-  };
-
-  pushCandidate(cleaned);
-
-  // Some env pipelines can turn "+" into spaces; try a recovery variant.
-  if (cleaned.includes(' ') && !cleaned.includes('+')) {
-    pushCandidate(cleaned.replace(/ /g, '+'));
+function assertExpectedPemFormat(value: string, envName: SigningPemEnvName) {
+  if (!isPemContent(value)) {
+    throw new Error(`${envName} must be inline PEM content (BEGIN/END block) or a valid file path.`);
   }
 
-  if (cleaned.includes('%')) {
-    try {
-      pushCandidate(decodeURIComponent(cleaned));
-    } catch {
-      // Ignore malformed URI encoding and continue with other candidates.
-    }
-  }
-
-  return candidates;
-}
-
-function assertExpectedPemFormat(
-
-  value: string,
-  envName: SigningPemEnvName
-) {
-  const parsed = parsePemBlock(value);
-  console.log('value', value);
-  console.log('envName', envName );
-  console.log('parsed', parsed);
-
-  if (!parsed) {
-    throw new Error(
-      `${envName} must be a complete PEM block with matching BEGIN/END lines.`
-    );
-  }
-
-  const label = parsed.label;
+  const label = getPemLabel(value);
   if (envName === 'KYA_SIGNING_PRIVATE_PEM') {
     const validPrivateLabel = label === 'PRIVATE KEY' || label === 'ED25519 PRIVATE KEY';
     if (!validPrivateLabel) {
@@ -276,7 +165,7 @@ function assertExpectedPemFormat(
         `${envName} must be an Ed25519 private key PEM (BEGIN PRIVATE KEY). Received: BEGIN ${label}.`
       );
     }
-    if (!canImportPemKey(parsed.normalizedPem, envName)) {
+    if (!canImportPemKey(value, envName)) {
       throw new Error(
         `${envName} is not a valid Ed25519 private key PEM. Value may be truncated or corrupted in env storage.`
       );
@@ -290,85 +179,51 @@ function assertExpectedPemFormat(
     );
   }
 
-  if (!canImportPemKey(parsed.normalizedPem, envName)) {
+  if (!canImportPemKey(value, envName)) {
     throw new Error(
       `${envName} is not a valid Ed25519 public key PEM. Value may be truncated or corrupted in env storage.`
     );
   }
 }
 
-/**
- * If value doesn't look like PEM, try base64 decode (Vercel-safe: newlines preserved).
- * See: https://github.com/vercel/vercel/issues/749
- * Supports: raw base64, or base64:... prefix to force decode.
- * Vercel may add spaces/newlines to env vars — strip them before decoding.
- */
-function maybeDecodeBase64Pem(value: string): string {
-  const trimmed = value.trim();
-  if (trimmed.startsWith('-----BEGIN')) return trimmed;
+function resolveEnvPemValue(value: string, jsonField: 'privateKey' | 'publicKey'): string {
+  const unwrapped = unquoteEnvValue(value);
 
-  const unwrapped =
-    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
-    (trimmed.startsWith("'") && trimmed.endsWith("'"))
-      ? trimmed.slice(1, -1).trim()
-      : trimmed;
-
-  // If user pasted "KYA_SIGNING_PRIVATE_PEM=<base64>" by mistake, use the part after =
-  let base64Input = stripInlineAssignment(unwrapped);
-  const forceBase64 = base64Input.toLowerCase().startsWith('base64:');
-  base64Input = forceBase64 ? base64Input.slice(7).trim() : base64Input;
-
-  const candidates = buildBase64Candidates(base64Input);
-  let firstPemCandidate: string | null = null;
-
-  for (const candidate of candidates) {
-    const decoded = decodeBase64Utf8(candidate);
-    if (!decoded || !decoded.trimStart().startsWith('-----BEGIN')) {
-      continue;
-    }
-
-    if (parsePemBlock(decoded)) {
-      return decoded;
-    }
-
-    if (!firstPemCandidate) {
-      firstPemCandidate = decoded;
+  if (unwrapped.startsWith('{')) {
+    try {
+      const parsed = JSON.parse(unwrapped) as Partial<Record<'privateKey' | 'publicKey', unknown>>;
+      const jsonValue = parsed[jsonField];
+      if (typeof jsonValue !== 'string' || !jsonValue.trim()) {
+        throw new Error(`JSON object is missing "${jsonField}"`);
+      }
+      return unquoteEnvValue(jsonValue).replace(/\\n/g, '\n').trim();
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : 'invalid JSON';
+      throw new Error(`Invalid JSON format for ${jsonField}: ${reason}`);
     }
   }
 
-  if (forceBase64) {
-    if (firstPemCandidate) {
-      throw new Error('base64: prefix used but decoded value is not a complete PEM block');
-    }
-    throw new Error('base64: prefix used but value is not valid base64');
-  }
-
-  if (firstPemCandidate) return firstPemCandidate;
-  return trimmed;
+  // Expected explicit format: single-line PEM with escaped newlines (\n)
+  return unwrapped.replace(/\\n/g, '\n').trim();
 }
 
 function resolveSigningKeyMaterial(belticDir: string): SigningKeyMaterial {
   const rawPrivate = process.env.KYA_SIGNING_PRIVATE_PEM?.trim();
   const rawPublic = process.env.KYA_SIGNING_PUBLIC_PEM?.trim();
 
-  const decodedPrivate = rawPrivate ? maybeDecodeBase64Pem(rawPrivate) : undefined;
-  const decodedPublic = rawPublic ? maybeDecodeBase64Pem(rawPublic) : undefined;
+  const explicitPrivate = rawPrivate ? resolveEnvPemValue(rawPrivate, 'privateKey') : undefined;
+  const explicitPublic = rawPublic ? resolveEnvPemValue(rawPublic, 'publicKey') : undefined;
 
   console.info('[KYA] Resolving signing key material:', {
     hasPrivateEnv: Boolean(rawPrivate),
     hasPublicEnv: Boolean(rawPublic),
-    privateEnvLength: rawPrivate?.length ?? 0,
-    publicEnvLength: rawPublic?.length ?? 0,
-    privateDecodedLength: decodedPrivate?.length ?? 0,
-    publicDecodedLength: decodedPublic?.length ?? 0,
-    privateLooksLikePem: Boolean(decodedPrivate && isPemContent(normalizePem(decodedPrivate))),
-    publicLooksLikePem: Boolean(decodedPublic && isPemContent(normalizePem(decodedPublic))),
+    privateEnvLength: explicitPrivate?.length ?? 0,
+    publicEnvLength: explicitPublic?.length ?? 0,
+    privateLooksLikePem: Boolean(explicitPrivate && isPemContent(explicitPrivate)),
+    publicLooksLikePem: Boolean(explicitPublic && isPemContent(explicitPublic)),
     belticDir,
     belticDirExists: existsSync(belticDir),
   });
-
-  const explicitPrivate = decodedPrivate ? normalizePem(decodedPrivate) : undefined;
-  const explicitPublic = decodedPublic ? normalizePem(decodedPublic) : undefined;
 
   if ((explicitPrivate && !explicitPublic) || (!explicitPrivate && explicitPublic)) {
     throw new Error('Set both KYA_SIGNING_PRIVATE_PEM and KYA_SIGNING_PUBLIC_PEM together');
@@ -377,8 +232,8 @@ function resolveSigningKeyMaterial(belticDir: string): SigningKeyMaterial {
   if (explicitPrivate && explicitPublic) {
     const privateIsPem = isPemContent(explicitPrivate);
     const publicIsPem = isPemContent(explicitPublic);
-    const privatePemLabel = privateIsPem ? parsePemBlock(explicitPrivate)?.label : undefined;
-    const publicPemLabel = publicIsPem ? parsePemBlock(explicitPublic)?.label : undefined;
+    const privatePemLabel = privateIsPem ? getPemLabel(explicitPrivate) : undefined;
+    const publicPemLabel = publicIsPem ? getPemLabel(explicitPublic) : undefined;
     console.info('[KYA] PEM content detection:', {
       privateIsPem,
       publicIsPem,
@@ -515,7 +370,7 @@ async function getSigningContext(): Promise<SigningContext> {
           } catch (e3) {
             const err = e3 instanceof Error ? e3 : new Error(String(e3));
             throw new Error(
-              `Invalid KYA_SIGNING_PRIVATE_PEM: ${err.message}. On Vercel use base64 (pnpm vercel:export-keys).`
+              `Invalid KYA_SIGNING_PRIVATE_PEM: ${err.message}. Use single-line PEM with \\n escapes (or JSON {"privateKey":"...\\n..."}).`
             );
           }
         }
@@ -533,11 +388,29 @@ async function getSigningContext(): Promise<SigningContext> {
           } catch (e3) {
             const err = e3 instanceof Error ? e3 : new Error(String(e3));
             throw new Error(
-              `Invalid KYA_SIGNING_PUBLIC_PEM: ${err.message}. On Vercel use base64 (pnpm vercel:export-keys).`
+              `Invalid KYA_SIGNING_PUBLIC_PEM: ${err.message}. Use single-line PEM with \\n escapes (or JSON {"publicKey":"...\\n..."}).`
             );
           }
         }
       }
+
+      let keyPairMatches = true;
+      let keyPairCheckError: string | null = null;
+      try {
+        const probeJwt = await new jose.SignJWT({ probe: 'kya-key-pair-check' })
+          .setProtectedHeader({ alg: 'EdDSA' })
+          .setIssuedAt()
+          .setExpirationTime('2m')
+          .sign(privateKey);
+        await jose.jwtVerify(probeJwt, publicKey, { algorithms: ['EdDSA'] });
+      } catch (e) {
+        keyPairMatches = false;
+        keyPairCheckError = e instanceof Error ? e.message : 'unknown key pair check error';
+      }
+      if (!keyPairMatches) {
+        throw new Error(`KYA signing key pair mismatch: ${keyPairCheckError ?? 'private/public keys do not match'}`);
+      }
+
       const publicJwk = await exportPublicKey(publicKey);
       const keyId = await computeJwkThumbprint(publicJwk);
 

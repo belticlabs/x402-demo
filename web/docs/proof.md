@@ -95,28 +95,18 @@ curl http://localhost:3002/api/credential
 3. At least one Base Sepolia tx hash from each scenario path.
 4. `/api/demo/status` output showing env readiness and mode flags.
 
-## Vercel Deployment — Base64 PEM Keys
+## Vercel Deployment — Escaped PEM Keys
 
-Vercel replaces newlines with spaces in env vars, which breaks inline PEM. Use **base64-encoded PEM**:
+Set keys as single-line PEM values with escaped newlines (`\n`), or JSON wrappers:
 
-1. **Generate base64 values** (from repo root):
-
-   ```bash
-   cd web && pnpm vercel:export-keys
-   ```
-
-   Or manually:
-   ```bash
-   base64 < .beltic/*-private.pem   # paste into KYA_SIGNING_PRIVATE_PEM
-   base64 < .beltic/*-public.pem    # paste into KYA_SIGNING_PUBLIC_PEM
-   ```
-
-2. In Vercel: Project → Settings → Environment Variables.
-3. Add `KYA_SIGNING_PRIVATE_PEM` = the base64 string (no `-----BEGIN`, no newlines).
-4. Add `KYA_SIGNING_PUBLIC_PEM` = the base64 string.
-5. Redeploy.
-
-The app detects non-PEM values and base64-decodes them automatically.
+1. In Vercel: Project → Settings → Environment Variables.
+2. Add `KYA_SIGNING_PRIVATE_PEM` as either:
+   - `-----BEGIN PRIVATE KEY-----\n<private-body>\n-----END PRIVATE KEY-----`
+   - `{"privateKey":"-----BEGIN PRIVATE KEY-----\n<private-body>\n-----END PRIVATE KEY-----"}`
+3. Add `KYA_SIGNING_PUBLIC_PEM` as either:
+   - `-----BEGIN PUBLIC KEY-----\n<public-body>\n-----END PUBLIC KEY-----`
+   - `{"publicKey":"-----BEGIN PUBLIC KEY-----\n<public-body>\n-----END PUBLIC KEY-----"}`
+4. Redeploy.
 
 ## Fork and Use Your Own Wallet
 
@@ -143,12 +133,13 @@ The app detects non-PEM values and base64-decodes them automatically.
 - Verify both env vars are set. Confirm private key is in `KYA_SIGNING_PRIVATE_PEM`, public in `KYA_SIGNING_PUBLIC_PEM`.
 
 3. PEM import failures on Vercel (asn1, wrong tag, etc.)
-- **Use base64**: Run `pnpm vercel:export-keys` and paste **only** the base64 lines (not the `KYA_SIGNING_*=` labels).
-- Ensure no extra spaces/newlines when pasting into Vercel. Copy the base64 string only.
-- If raw base64 fails, try prefixing the value with `base64:` (e.g. `base64:LS0tLS1CRUdJTi...`).
+- Use escaped PEM with `\n` (single line), not literal multiline PEM.
+- Ensure keys are not truncated and include full BEGIN/END blocks.
+- Optional JSON format is supported:
+  - `{"privateKey":"-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----"}`
+  - `{"publicKey":"-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----"}`
 - Check Vercel runtime logs for:
   - `privateEnvLength`, `publicEnvLength`
-  - `privateDecodedLength`, `publicDecodedLength`
   - `privateLooksLikePem`, `publicLooksLikePem`
   These are safe diagnostics (no key material) and help identify truncation or env overrides.
 - Re-copy key material and check BEGIN/END headers:
