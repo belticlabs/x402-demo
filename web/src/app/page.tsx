@@ -498,8 +498,8 @@ function ScenarioColumn({ scenario, state, onPaymentDecision, agentInfo }: Scena
       {/* Messages area with more padding */}
       <div className="flex-1 overflow-y-auto px-6 py-4 space-y-5">
         {state.messages.length === 0 && !state.isThinking && (
-          <div className="flex items-center justify-center h-full text-[var(--muted)] text-sm">
-            <p>Ask about weather...</p>
+          <div className="flex items-center justify-center h-full text-[var(--muted)] text-sm text-center leading-relaxed">
+            <p>Basic weather is free. Detailed forecasts trigger a USDC payment.</p>
           </div>
         )}
 
@@ -600,9 +600,9 @@ interface UnifiedInputProps {
 }
 
 const suggestions = [
-  "What's the weather in SF?",
   'Give me a detailed forecast for NYC',
   'Compare weather in Tampa, Florida and Miami',
+  "What's the weather in SF?",
 ];
 
 function UnifiedInput({ onSend, disabled = false }: UnifiedInputProps) {
