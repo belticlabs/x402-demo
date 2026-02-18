@@ -1259,12 +1259,10 @@ export default function Home() {
     handlePaymentDecision('x402-kya', rightState, setRightState, 'right', accepted);
   }, [handlePaymentDecision, rightState]);
 
-  // Handle sending message to both columns (staggered to avoid concurrent x402 settlement)
+  // Handle sending message to both columns
   const handleSendToBoth = useCallback((content: string) => {
     streamResponse('x402-only', content, setLeftState, false, undefined, undefined);
-    setTimeout(() => {
-      streamResponse('x402-kya', content, setRightState, false, undefined, undefined);
-    }, 1500);
+    streamResponse('x402-kya', content, setRightState, false, undefined, undefined);
   }, [streamResponse, selectedKybTier]);
 
   // Reset both columns
