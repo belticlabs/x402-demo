@@ -72,6 +72,7 @@ type StreamEvent =
   | { type: 'payment_required'; resource: string; basePrice: number; finalPrice: number; discount: number; paymentSessionId: string }
   | { type: 'payment_waiting'; paymentSessionId: string }
   | { type: 'payment_processing'; paymentSessionId: string }
+  | { type: 'payment_retrying'; paymentSessionId: string; attempt: number; maxAttempts: number }
   | { type: 'payment_accepted'; paymentSessionId: string; txHash: string; txLink: string }
   | { type: 'payment_failed'; paymentSessionId: string; error: string }
   | { type: 'payment_declined' }
@@ -622,26 +623,47 @@ export async function POST(request: NextRequest) {
                   });
                   send({ type: 'payment_processing', paymentSessionId });
 
-                  try {
-                    const normalizedMinKybTier =
-                      typeof minKybTier === 'string' && minKybTier.trim()
-                        ? (minKybTier.trim().toLowerCase() as KybTier)
-                        : undefined;
-                    const url = buildX402WeatherUrl(
-                      location,
-                      'verified',
-                      appUrl,
-                      normalizedMinKybTier
-                    );
-                    const signedHeaders = await createSignedBelticHeaders(url, 'GET');
-                    const paid = await fetchDetailedWeatherThroughX402(
-                      location,
-                      'verified',
-                      signedHeaders,
-                      appUrl,
-                      normalizedMinKybTier
-                    );
+                  const normalizedMinKybTier =
+                    typeof minKybTier === 'string' && minKybTier.trim()
+                      ? (minKybTier.trim().toLowerCase() as KybTier)
+                      : undefined;
 
+                  const maxRetries = 3;
+                  let lastError: string | null = null;
+                  let paid: { txHash?: string; txLink?: string } | null = null;
+
+                  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+                    try {
+                      const url = buildX402WeatherUrl(
+                        location,
+                        'verified',
+                        appUrl,
+                        normalizedMinKybTier
+                      );
+                      const signedHeaders = await createSignedBelticHeaders(url, 'GET');
+                      paid = await fetchDetailedWeatherThroughX402(
+                        location,
+                        'verified',
+                        signedHeaders,
+                        appUrl,
+                        normalizedMinKybTier
+                      );
+                      break;
+                    } catch (paymentError) {
+                      lastError = paymentError instanceof Error ? paymentError.message : 'x402 payment request failed';
+                      if (attempt < maxRetries) {
+                        send({
+                          type: 'payment_retrying',
+                          paymentSessionId,
+                          attempt: attempt + 1,
+                          maxAttempts: maxRetries,
+                        });
+                        await new Promise(r => setTimeout(r, 1500 * attempt));
+                      }
+                    }
+                  }
+
+                  if (paid) {
                     paymentAttempts.set(attemptKey, {
                       status: 'accepted',
                       updatedAt: Date.now(),
@@ -651,21 +673,19 @@ export async function POST(request: NextRequest) {
                     send({
                       type: 'payment_accepted',
                       paymentSessionId,
-                      txHash: paid.txHash,
-                      txLink: paid.txLink,
+                      txHash: paid.txHash || '',
+                      txLink: paid.txLink || '',
                     });
-                  } catch (paymentError) {
-                    const message =
-                      paymentError instanceof Error ? paymentError.message : 'x402 payment request failed';
+                  } else {
                     paymentAttempts.set(attemptKey, {
                       status: 'failed',
                       updatedAt: Date.now(),
-                      error: message,
+                      error: lastError || 'x402 payment request failed',
                     });
                     send({
                       type: 'payment_failed',
                       paymentSessionId,
-                      error: message,
+                      error: lastError || 'x402 payment request failed',
                     });
                     send({ type: 'done' });
                     controller.close();

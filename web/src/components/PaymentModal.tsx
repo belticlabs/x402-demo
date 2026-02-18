@@ -115,7 +115,7 @@ export default function PaymentModal({
           {isProcessing && (
             <div className="flex items-center gap-2 py-2 text-sm text-[var(--muted-foreground)]">
               <Loader2 className="w-4 h-4 animate-spin" />
-              <span>Processing...</span>
+              <span>{txError && txError.startsWith('Retrying') ? txError : 'Processing...'}</span>
             </div>
           )}
 
@@ -149,7 +149,7 @@ export default function PaymentModal({
             </p>
           )}
 
-          {txError && (
+          {txError && !txError.startsWith('Retrying') && (
             <p className="text-sm text-red-500 py-1">
               {txError}
             </p>

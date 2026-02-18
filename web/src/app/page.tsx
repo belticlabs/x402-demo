@@ -910,6 +910,8 @@ export default function Home() {
             error?: string;
             text?: string;
             message?: string;
+            attempt?: number;
+            maxAttempts?: number;
           };
 
           switch (event.type) {
@@ -981,6 +983,17 @@ export default function Home() {
                 paymentFlowState: 'payment_processing',
                 txProcessing: true,
                 txError: null,
+                isPayActionLocked: true,
+                paymentSessionId: event.paymentSessionId || prev.paymentSessionId,
+              }));
+              break;
+
+            case 'payment_retrying':
+              setState(prev => ({
+                ...prev,
+                paymentFlowState: 'payment_processing',
+                txProcessing: true,
+                txError: `Retrying (${event.attempt || 1}/${event.maxAttempts || 3})...`,
                 isPayActionLocked: true,
                 paymentSessionId: event.paymentSessionId || prev.paymentSessionId,
               }));
@@ -1246,11 +1259,12 @@ export default function Home() {
     handlePaymentDecision('x402-kya', rightState, setRightState, 'right', accepted);
   }, [handlePaymentDecision, rightState]);
 
-  // Handle sending message to both columns
+  // Handle sending message to both columns (staggered to avoid concurrent x402 settlement)
   const handleSendToBoth = useCallback((content: string) => {
-    // Start streaming for both columns in parallel
     streamResponse('x402-only', content, setLeftState, false, undefined, undefined);
-    streamResponse('x402-kya', content, setRightState, false, undefined, undefined);
+    setTimeout(() => {
+      streamResponse('x402-kya', content, setRightState, false, undefined, undefined);
+    }, 1500);
   }, [streamResponse, selectedKybTier]);
 
   // Reset both columns
