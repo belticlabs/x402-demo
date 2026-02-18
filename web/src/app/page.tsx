@@ -9,6 +9,7 @@ import remarkGfm from 'remark-gfm';
 import ChainOfThought from '@/components/ChainOfThought';
 import PaymentModal from '@/components/PaymentModal';
 import VerifiedBadge from '@/components/VerifiedBadge';
+import OnboardingModal from '@/components/OnboardingModal';
 import { useTheme } from '@/components/ThemeProvider';
 import { createLineBufferParser, parseSseDataLine } from '@/lib/sse';
 
@@ -1266,6 +1267,7 @@ export default function Home() {
 
   return (
     <div className="min-h-screen flex flex-col bg-[var(--background)]">
+      <OnboardingModal />
       {/* Header */}
       <Header
         onReset={handleReset}
