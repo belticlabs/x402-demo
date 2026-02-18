@@ -223,6 +223,11 @@ export default function VerifiedBadge({
       >
         <Check className="w-3 h-3" />
         <span>Verified</span>
+        {/* Ping indicator */}
+        <span className="relative flex h-2 w-2 ml-0.5">
+          <span className="animate-ping absolute inset-0 rounded-full bg-[var(--success)] opacity-75" />
+          <span className="relative inline-flex rounded-full h-2 w-2 bg-[var(--success)]" />
+        </span>
       </button>
 
       {/* Popover */}
